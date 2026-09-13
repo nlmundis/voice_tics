@@ -157,17 +157,36 @@ class EvidenceCitationExemptionTest(unittest.TestCase):
                          "a cell must not excuse prose a paragraph would not")
         self.assertEqual(len(emdash.lone_dash_blocks(prose, CITE_RE)), 1)
 
-    def test_the_reported_position_skips_an_exempt_label_dash(self) -> None:
+    def test_the_reported_position_skips_an_exempt_dash(self) -> None:
         """The docstring promises the index points at a COUNTED dash; in a cell
-        carrying both a label dash and a real one, that is the second."""
-        cell = "| AGC — Atlassian Government Cloud, which — note |"
-        found = emdash.lone_dash_lines(cell)
+        carrying both an exempt dash and a real one, that is the second.
+
+        This once used a label cell, "AGC — Atlassian Government Cloud, which
+        — note". Counting cannot tell that from a matched pair, and the label
+        exemption now applies only to an odd count, so the cell is clean: the
+        undercount this module prefers to failing a build on a correct pair.
+        """
+        cell = '| EVIDENCE: "a — b" and then a lone — dash |'
+        found = emdash.lone_dash_lines(cell, CITE_RE)
         self.assertEqual(len(found), 1)
         _line, blk, at = found[0]
         self.assertEqual(blk[at], emdash.EM_DASH)
         self.assertGreater(at, blk.index(emdash.EM_DASH),
-                           "the label dash was exempted, so it must not be the "
+                           "the cited dash was exempted, so it must not be the "
                            "one reported")
+
+    def test_a_matched_pair_in_a_cell_is_clean(self) -> None:
+        """The label exemption blanked the first dash of ANY cell, so a
+        correct pair became odd and failed the build."""
+        self.assertEqual(emdash.lone_dash_lines(
+            "| Every deliverable — discovery, apps — follows |"), [])
+
+    def test_the_label_ceiling_is_sixty_characters(self) -> None:
+        """Past sixty characters a leading dash is a clause, not a label."""
+        # The cell text includes its padding: " " + term + " " precedes the dash.
+        self.assertEqual(emdash.lone_dash_lines(f"| {'x' * 58} — definition |"), [])
+        self.assertEqual(
+            len(emdash.lone_dash_lines(f"| {'x' * 59} — definition |")), 1)
 
     def test_the_label_exception_still_works_beside_the_carve_out(self) -> None:
         """The two exemptions are independent; neither may disarm the other."""

@@ -85,6 +85,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import vt_config as config_mod  # noqa: E402
+from emdash import fence_spans  # noqa: E402,F401  (re-exported)
 from vt_redact import redact  # noqa: E402
 
 PROJECTS_GLOB = config_mod.DEFAULT_TRANSCRIPTS
@@ -106,21 +107,9 @@ DEFAULT_MIN_COUNT = 5
 BASELINE_FLOOR_COUNT = 0.5
 
 # ---------------------------------------------------------------- text scrubs
-# Both delimiters anchored to line starts (up to 3 spaces indent), per
-# CommonMark: a mid-line ``` run is literal text, not a fence. Unanchored,
-# a stray mid-line pair swallowed the prose between — and prose_lint's
-# row-masking could delete the run that closed such a match, stitching it
-# to the next one lines away (2026-08-13, PR #46 verification, round
-# five). The closer line must hold nothing but the backticks.
-CODE_FENCE_RE = re.compile(r"^[ \t]{0,3}```.*?\n[ \t]{0,3}```[ \t]*$",
-                           re.DOTALL | re.MULTILINE)
-# The two halves of that pattern, used by strip_fences() to do the same job in
-# one left-to-right pass. CODE_FENCE_RE stays as the SPEC the scan is tested
-# against -- tests/test_voice_tics.py asserts the two agree -- because a regex
-# is the clearer statement of what a fence IS, and it is still correct, just
-# quadratic on input nobody sane writes.
-FENCE_OPEN_RE = re.compile(r"^[ \t]{0,3}```", re.MULTILINE)
-FENCE_CLOSE_RE = re.compile(r"^[ \t]{0,3}```[ \t]*$", re.MULTILINE)
+# What a fenced code block is lives in ONE place, emdash.fence_spans, because
+# prose_lint partitions a document using emdash's stripping and scrub's
+# together and the two must agree line for line.
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 URL_RE = re.compile(r"https?://\S+")
 # A path-looking token: two or more slash-separated segments, or a leading ~/ .
@@ -270,52 +259,10 @@ SCRUB_GAP = "\u2029"
 BASELINE_SIGNATURES: Tuple[Tuple[str, str], ...] = ()
 
 
-def fence_spans(text: str) -> List[Tuple[int, int]]:
-    """The spans ``CODE_FENCE_RE`` would match, found in ONE pass.
-
-    Same answer as the regex, without its worst case. ``CODE_FENCE_RE`` is
-    lazy and multiline, so on a document whose fences are never closed it
-    restarts at every opening line and scans to end of input each time: O(n^2),
-    measured at 0.047 / 0.196 / 0.788 / 3.160 seconds for 1,000 / 2,000 /
-    4,000 / 8,000 unclosed fence lines. A document demonstrating markdown
-    syntax is enough to trigger it, and ``scrub`` runs over every record in a
-    corpus.
-
-    It is linear because openers and closers are each found once, and the
-    closer index only ever moves FORWARD: no opener rescans text an earlier
-    opener already passed, which is precisely what the regex does. The
-    ``break`` is a small saving on top, not the reason -- with it replaced by
-    ``continue`` the answer and the complexity are both unchanged, which is
-    why no mutant guards it.
-
-    Args:
-        text: Raw markdown or chat text.
-
-    Returns:
-        Ascending, non-overlapping (start, end) offsets, exactly as
-        ``CODE_FENCE_RE.finditer`` would yield them.
-    """
-    closers = [(m.start(), m.end()) for m in FENCE_CLOSE_RE.finditer(text)]
-    spans: List[Tuple[int, int]] = []
-    index, after = 0, 0
-    for opener in FENCE_OPEN_RE.finditer(text):
-        if opener.start() < after:
-            continue
-        # A fence needs the newline between opener and closer, so the closer
-        # must start strictly after the opener does.
-        while index < len(closers) and closers[index][0] <= opener.start():
-            index += 1
-        if index >= len(closers):
-            break
-        spans.append((opener.start(), closers[index][1]))
-        after = closers[index][1]
-    return spans
-
-
 def strip_fences(text: str, repl: str = " ", keep_lines: bool = False) -> str:
     """``text`` with every fenced block replaced by ``repl``.
 
-    The fence pass of ``scrub``, split out so it can use ``fence_spans``.
+    The fence pass of ``scrub``, over ``emdash.fence_spans``.
 
     Args:
         text: Raw markdown or chat text.
@@ -382,7 +329,7 @@ def scrub(text: str, keep_lines: bool = False, gap: str = " ") -> str:
     )
     text = text.translate(SMART_PUNCT)
     # The fence pass runs first and separately: it is the only one that must
-    # cross line boundaries, and the only one with a quadratic regex.
+    # cross line boundaries.
     text = strip_fences(text, gap, keep_lines)
     for rx, repl in passes:
         text = rx.sub(_keep(repl) if keep_lines else repl, text)

@@ -26,6 +26,7 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,7 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import emdash  # noqa: E402
 import voice_tics as vt  # noqa: E402
 from tests import support  # noqa: E402
 
@@ -596,12 +598,16 @@ class CorpusTest(unittest.TestCase):
 
 
 class FenceScanTest(unittest.TestCase):
-    """fence_spans must agree with CODE_FENCE_RE, and must stay linear.
+    """emdash.fence_spans: one fence definition, linear, and CommonMark-shaped.
 
-    CODE_FENCE_RE is kept as the SPEC: it is the clearer statement of what a
-    fence is. fence_spans is the implementation, and these tests are what let
-    the two be trusted as the same thing.
+    The regex it replaced is kept here as a spec for the subset where the two
+    must still agree: three-backtick fences indented up to three spaces or a
+    tab. Beyond that subset the scan deliberately knows more, and the cases
+    below pin each difference.
     """
+
+    LEGACY_SPEC = re.compile(r"^[ \t]{0,3}```.*?\n[ \t]{0,3}```[ \t]*$",
+                             re.DOTALL | re.MULTILINE)
 
     TRICKY = [
         "",
@@ -624,13 +630,13 @@ class FenceScanTest(unittest.TestCase):
         "```\n```\n```\n```",
     ]
 
-    def test_agrees_with_the_spec_regex_on_tricky_input(self) -> None:
+    def test_agrees_with_the_legacy_spec_on_its_subset(self) -> None:
         for text in self.TRICKY:
             with self.subTest(text=text):
-                want = [m.span() for m in vt.CODE_FENCE_RE.finditer(text)]
+                want = [m.span() for m in self.LEGACY_SPEC.finditer(text)]
                 self.assertEqual(vt.fence_spans(text), want, text)
 
-    def test_agrees_with_the_spec_regex_on_random_input(self) -> None:
+    def test_agrees_with_the_legacy_spec_on_random_subset_input(self) -> None:
         """Randomised, because the tricky list is only what someone thought of."""
         import random
         lines = ["```", "```py", "   ```", "```x", "text", "", "  ",
@@ -640,15 +646,51 @@ class FenceScanTest(unittest.TestCase):
             text = "\n".join(rng.choice(lines) for _ in range(rng.randint(0, 12)))
             if rng.random() < 0.5:
                 text += "\n"
-            want = [m.span() for m in vt.CODE_FENCE_RE.finditer(text)]
+            want = [m.span() for m in self.LEGACY_SPEC.finditer(text)]
             self.assertEqual(vt.fence_spans(text), want, repr(text))
+
+    def _code_is_gone(self, text: str) -> None:
+        self.assertNotIn("secret", vt.scrub(text))
+        self.assertNotIn("secret", emdash.strip_code(text))
+
+    def test_a_tilde_fence_is_code(self) -> None:
+        self._code_is_gone("~~~\nsecret — code\n~~~\nprose")
+
+    def test_a_backtick_in_the_info_string_is_not_a_fence(self) -> None:
+        """"```x``` is the inline form" is a paragraph in CommonMark; as an
+        opener it swallowed the prose after it and desynchronised the next
+        real fence."""
+        text = "```x``` is inline — here.\nReal prose.\n\n```\nsecret\n```\n"
+        self.assertEqual(vt.fence_spans(text), [(text.index("```\nsecret"),
+                                                 len(text) - 1)])
+
+    def test_a_longer_fence_shows_a_shorter_one_inside_it(self) -> None:
+        self._code_is_gone("````\n```\nsecret\n```\n````\nprose")
+        self.assertIn("prose", vt.scrub("````\n```\nsecret\n```\n````\nprose"))
+
+    def test_a_crlf_document_is_fenced_like_an_lf_one(self) -> None:
+        """Piped on stdin, CRLF is not translated, so the verdict depended on
+        how the document reached the tool."""
+        self._code_is_gone("Intro.\r\n```\r\nsecret\r\n```\r\nTail.\r\n")
+
+    def test_a_fence_indented_inside_a_list_item_is_code(self) -> None:
+        self._code_is_gone("- Install it:\n\n    ```bash\n    secret\n    ```\n")
+
+    def test_scrub_and_strip_code_agree_about_a_no_break_space(self) -> None:
+        """scrub folds U+00A0 to a space before scanning; strip_code does not.
+        The scan must give both the same answer."""
+        text = "Intro.\n\n\u00a0```\n| a secret b | c |\n```\n\nEnd.\n"
+        folded = text.translate(vt.SMART_PUNCT)
+        self.assertEqual(vt.fence_spans(folded), emdash.fence_spans(text))
+        self._code_is_gone(text)
 
     def test_scrub_still_removes_fenced_code(self) -> None:
         self.assertNotIn("secret", vt.scrub("before\n```\nsecret\n```\nafter"))
         self.assertIn("before", vt.scrub("before\n```\nsecret\n```\nafter"))
 
     def test_an_unclosed_fence_is_not_stripped(self) -> None:
-        """Matching the regex: an unterminated fence is literal text."""
+        """An unterminated fence is literal text, so a stray opener cannot
+        delete the rest of a document from the lint."""
         text = "```\nthis is never closed"
         self.assertEqual(vt.fence_spans(text), [])
         self.assertIn("never closed", vt.scrub(text))
@@ -661,8 +703,8 @@ class FenceScanTest(unittest.TestCase):
     def test_unclosed_fences_do_not_blow_up(self) -> None:
         """The reason fence_spans exists, pinned as a budget.
 
-        CODE_FENCE_RE is lazy and multiline, so it restarts at every opening
-        line and scans to end of input: measured 3.16s for this input. The
+        The regex this replaced was lazy and multiline, so it restarted at
+        every opening line and scanned to end of input: 3.16s for this input. The
         scan does it in about a millisecond. The budget is generous by three
         orders of magnitude so this cannot flake on a loaded machine, while
         still failing outright if the quadratic path ever comes back.

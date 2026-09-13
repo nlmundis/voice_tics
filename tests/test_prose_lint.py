@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 
 def _emdash_cfg(exempt: str = ""):
@@ -565,6 +566,69 @@ class BannedPhrases(unittest.TestCase):
         self.assertEqual(found[0].rule, "banned:load bearing")
 
 
+class OneEngineForEveryRule(unittest.TestCase):
+    """Tics and banned phrases read a document the same way."""
+
+    def _cfg(self, **kwargs):
+        import vt_config as config_mod
+        return config_mod.Config(**kwargs)
+
+    def test_a_banned_phrase_in_a_well_formed_table_row_is_found(self) -> None:
+        """scrub blanks complete rows, so the old whole-document pass never
+        saw one; a row missing its trailing pipe was caught instead."""
+        cfg = self._cfg(banned=(("load bearing", "", "error"),))
+        found, _ = prose_lint.lint_text(
+            "| a | b |\n|---|---|\n| this cell is load bearing | x |\n", cfg)
+        self.assertEqual([(f.line, f.rule) for f in found],
+                         [(3, "banned:load bearing")])
+
+    def test_no_finding_is_placed_on_a_table_row_it_does_not_hold(self) -> None:
+        """The "." row mask was matched as a sentence terminator."""
+        cfg = self._cfg(error_tics=("rhetorical_self_question",), warn_tics=())
+        found, _ = prose_lint.lint_text(
+            "| col | why |\n|---|---|\n| alpha | beta |\n"
+            "The result? Nothing separated.\n", cfg)
+        self.assertEqual([(f.line, f.excerpt) for f in found],
+                         [(4, "The result?")])
+
+    def test_a_finding_is_on_the_line_of_its_words(self) -> None:
+        """Not the line whose full stop the pattern opened with."""
+        cfg = self._cfg(error_tics=("rhetorical_self_question",), warn_tics=())
+        found, _ = prose_lint.lint_text(
+            "This approach was tested carefully.\nThe result? Nothing.\n", cfg)
+        self.assertEqual([(f.line, f.excerpt) for f in found],
+                         [(2, "The result?")])
+
+    def test_no_match_crosses_a_table(self) -> None:
+        """Wrapped across a plain line break this IS the tic; across a table
+        it is two unrelated lines, and an empty-line mask stitched them."""
+        cfg = self._cfg(error_tics=("not_x_but_y",), warn_tics=())
+        wrapped, _ = prose_lint.lint_text(
+            "It is not the code,\nit's the config.\n", cfg)
+        self.assertEqual(len(wrapped), 1)
+        found, _ = prose_lint.lint_text(
+            "It is not the code,\n| a | b |\nit's the config.\n", cfg)
+        self.assertEqual(found, [])
+
+    def test_code_in_a_list_item_fence_is_not_prose(self) -> None:
+        found, _ = prose_lint.lint_text(
+            "- Install it:\n\n    ```bash\n    # which means that this is code\n"
+            "    ```\n\n- Done.\n")
+        self.assertEqual(found, [])
+
+    def test_code_in_a_no_break_space_indented_fence_is_not_a_cell(self) -> None:
+        found, _ = prose_lint.lint_text(
+            "Intro.\n\n\u00a0```\n| a which means that b | c |\n```\n\nEnd.\n")
+        self.assertEqual(found, [])
+
+    def test_crlf_on_stdin_is_linted_like_a_file(self) -> None:
+        cfg = _tmp_cfg("[lint.emdash]\nenabled = true\n")
+        with mock.patch("sys.stdin", io.StringIO(
+                "Intro.\r\n```\r\nx = a — b\r\n```\r\nTail.\r\n")):
+            code, out = _run_main(["--config", cfg, "-"])
+        self.assertEqual(code, 0, out)
+
+
 class BannedPhraseConfig(unittest.TestCase):
     """Validation of [lint] banned."""
 
@@ -756,6 +820,16 @@ class Cli(unittest.TestCase):
             sys.stdin = real
         self.assertEqual(code, 1)
         self.assertIn("method_defence", out)
+
+    def test_a_retired_tic_key_is_a_usage_error_before_any_file(self):
+        """Exit 2 with a message, not a KeyError traceback from the first
+        file that reaches the rule."""
+        cfg = _tmp_cfg('[lint]\nerror = ["no_such_detector"]\nwarn = []\n')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, _ = _run_main(["--config", cfg, _tmp(self.CLEAN)])
+        self.assertEqual(code, 2)
+        self.assertIn("no_such_detector", err.getvalue())
 
     def test_missing_file_is_a_usage_error(self):
         with contextlib.redirect_stderr(io.StringIO()):

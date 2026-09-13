@@ -151,19 +151,51 @@ replace = "def redact(text: str, keep_domains: Sequence[str] = (\"com\",)) -> st
 
 [[mutant]]
 name = "fence_closer_may_sit_on_the_opener_line"
-why = "A fence needs the newline between opener and closer; allowing equality would match a single ``` line as a whole fence."
+why = "A fence needs the newline between opener and closer; otherwise a single ``` line is a whole fence."
 suites = ["tests.test_voice_tics.FenceScanTest"]
-file = "voice_tics.py"
-find = "        while index < len(closers) and closers[index][0] <= opener.start():"
-replace = "        while index < len(closers) and closers[index][0] < opener.start():"
+file = "emdash.py"
+find = "        elif (char == opener[1] and run >= opener[2]"
+replace = "        if opener[1] and (char == opener[1] and run >= opener[2]"
 
 [[mutant]]
-name = "fence_spans_may_overlap"
-why = "Openers inside an already-consumed fence are body text, not fences; without this they would match again."
+name = "backtick_in_the_info_string_opens_a_fence"
+why = "An inline ```x``` at line start swallowed the prose after it and desynchronised the next real fence."
 suites = ["tests.test_voice_tics.FenceScanTest"]
-file = "voice_tics.py"
-find = "        if opener.start() < after:\n            continue"
-replace = "        if False:\n            continue"
+file = "emdash.py"
+find = '            if run >= 3 and (char == "~" or "`" not in body[run:]):'
+replace = "            if run >= 3:"
+
+[[mutant]]
+name = "a_shorter_run_closes_a_longer_fence"
+why = "A four-backtick fence exists to show a three-backtick one inside it."
+suites = ["tests.test_voice_tics.FenceScanTest"]
+file = "emdash.py"
+find = "        elif (char == opener[1] and run >= opener[2]"
+replace = "        elif (char == opener[1] and run >= 3"
+
+[[mutant]]
+name = "tilde_fences_are_prose"
+why = "The tilde fence is what an author reaches for when the sample holds backticks; its code failed the build."
+suites = ["tests.test_voice_tics.FenceScanTest"]
+file = "emdash.py"
+find = '        run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0'
+replace = '        run = len(body) - len(body.lstrip(char)) if char == "`" else 0'
+
+[[mutant]]
+name = "crlf_closer_not_recognised"
+why = "Piped on stdin CRLF is not translated, so the same bytes passed as a file and failed as a pipe."
+suites = ["tests.test_voice_tics.FenceScanTest", "tests.test_prose_lint.OneEngineForEveryRule"]
+file = "emdash.py"
+find = '              and not body[run:].strip(FENCE_INDENT + "\r")):'
+replace = "              and not body[run:].strip(FENCE_INDENT)):"
+
+[[mutant]]
+name = "no_break_space_indent_is_not_a_fence"
+why = "scrub folds U+00A0 before scanning and strip_code does not; disagreeing, code inside the fence was linted as a cell."
+suites = ["tests.test_voice_tics.FenceScanTest", "tests.test_prose_lint.OneEngineForEveryRule"]
+file = "emdash.py"
+find = 'FENCE_INDENT = " \t\u00a0"'
+replace = 'FENCE_INDENT = " \t"'
 
 # --- banned phrases: a preference, kept out of the evidence ---------------
 
@@ -204,8 +236,8 @@ name = "banned_phrase_counted_inside_code"
 why = "A phrase in a code sample is not the author's prose, and flagging it trains people to ignore the linter."
 suites = ["tests.test_prose_lint.BannedPhrases"]
 file = "prose_lint.py"
-find = "    prose = voice_tics.scrub(text, keep_lines=True)\n    out: List[Finding] = []\n    for phrase, instead, tier in banned:"
-replace = "    prose = text\n    out: List[Finding] = []\n    for phrase, instead, tier in banned:"
+find = "    body = voice_tics.scrub(body_input, keep_lines=True)"
+replace = "    body = body_input"
 
 [[mutant]]
 name = "duplicate_banned_phrases_silently_collapse"
@@ -238,7 +270,7 @@ name = "label_exception_applied_to_prose"
 why = "Applying the table-cell label exception to prose inverts the check; it produced 1,334 bogus findings once."
 suites = ["tests.test_emdash.LoneDashTest"]
 file = "emdash.py"
-find = "        if is_cell:"
+find = "        if is_cell and blank(blk, spans).count(EM_DASH) % 2 == 1:"
 replace = "        if True:"
 
 # --- the published claims: stdlib only, a gate that cannot skip -----------
@@ -618,3 +650,53 @@ suites = ["tests.test_samples.SamplesConfigTest"]
 file = "vt_config.py"
 find = "                re.compile(exempt)\n            except re.error as exc:"
 replace = "                pass\n            except re.error as exc:"
+
+# --- prose_lint: one engine, tables as boundaries --------------------------
+
+[[mutant]]
+name = "label_exemption_flips_a_matched_pair"
+why = "Blanking the first dash of an even count turned a correct pair in a cell into a build-failing violation."
+suites = ["tests.test_emdash.EvidenceCitationExemptionTest"]
+file = "emdash.py"
+find = "        if is_cell and blank(blk, spans).count(EM_DASH) % 2 == 1:"
+replace = "        if is_cell:"
+
+[[mutant]]
+name = "label_ceiling_widened"
+why = "Past sixty characters a leading dash is a clause; a wider ceiling silences a real lone dash."
+suites = ["tests.test_emdash.EvidenceCitationExemptionTest"]
+file = "emdash.py"
+find = "{{1,60}}?"
+replace = "{{1,600}}?"
+
+[[mutant]]
+name = "banned_phrases_skip_the_table_pass"
+why = "A configured error-tier ban stopped being checked for every well-formed table row, and the build went green."
+suites = ["tests.test_prose_lint.OneEngineForEveryRule"]
+file = "prose_lint.py"
+find = "        prose = voice_tics.scrub(cell)\n        for rule, tier, rx, why in rows:"
+replace = "        prose = voice_tics.scrub(cell)\n        for rule, tier, rx, why in [r for r in rows if not r[0].startswith('banned:')]:"
+
+[[mutant]]
+name = "finding_reported_at_the_previous_terminator"
+why = "A match that opens with the last sentence's full stop was reported one line early, with the stop in the excerpt."
+suites = ["tests.test_prose_lint.OneEngineForEveryRule"]
+file = "prose_lint.py"
+find = "    return lead if lead < len(matched) else 0"
+replace = "    return 0"
+
+[[mutant]]
+name = "tier_keys_compiled_per_file"
+why = "A retired key must fail the run with exit 2 before any file, not as a traceback from the first file."
+suites = ["tests.test_prose_lint.Cli"]
+file = "prose_lint.py"
+find = "        tier_patterns(cfg.error_tics, cfg.warn_tics)\n    except KeyError as exc:"
+replace = "        pass\n    except KeyError as exc:"
+
+[[mutant]]
+name = "table_rows_masked_as_empty_lines"
+why = "An empty line is regex-transparent; patterns whose classes admit newlines stitched prose on either side of a table into a finding the document does not contain."
+suites = ["tests.test_prose_lint.OneEngineForEveryRule", "tests.test_prose_lint.LineNumbersOnRealMarkdown"]
+file = "prose_lint.py"
+find = '''        "." if emdash.is_table_row(plain) else raw'''
+replace = '''        "" if emdash.is_table_row(plain) else raw'''

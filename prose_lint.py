@@ -166,74 +166,106 @@ def tier_patterns(error_tics: Sequence[str] = (),
     )
 
 
-def _tic_findings(text: str,
-                  tiers: Sequence[Tuple[str, str, Pattern[str], str]]
-                  ) -> List[Finding]:
-    """Pattern-tic findings: one pass over body prose, one over table cells.
+Row = Tuple[str, str, Pattern[str], str]  # rule, tier, pattern, why
 
-    The two passes partition the document's LINES by one test on one
-    rendering: ``emdash.is_table_row`` of the code-stripped line, the
-    same rendering the cell walk classifies. Rows are blanked out of the
-    INPUT before body scrubbing — not out of the scrubbed output, where a
-    multi-line link opening on a row can relocate a following line's prose
-    onto the masked row and silently drop its finding (found 2026-08-13,
-    PR #46 verification; earlier, classifying the mask on the raw line
-    while the walk saw the stripped one linted markup-prefixed rows twice).
 
-    Cell prose then goes through the same ``scrub`` as body prose, so
-    ``**isn't**`` in a cell is caught exactly as in a paragraph — a
-    model-drafted assessment carries its findings in tables. Two accepted
+def _pattern_findings(text: str, rows: Sequence[Row]) -> List[Finding]:
+    """Findings for every (rule, tier, pattern, why) row, measured tics and
+    banned phrases alike: one pass over body prose, one over table cells.
+
+    ONE ENGINE FOR BOTH KINDS OF RULE
+        Banned phrases once had their own pass, a scrub of the whole document,
+        and scrub blanks every complete table row, so a banned phrase in a
+        well-formed table was never reported while a measured tic in the same
+        cell was. A model-drafted assessment carries its findings in tables.
+        Both kinds of rule now go through here; they stay apart in their rule
+        names and their config, not in how a document is read.
+
+    THE PARTITION
+        The two passes partition the document's LINES by one test on one
+        rendering: ``emdash.is_table_row`` of the code-stripped line, the same
+        rendering the cell walk classifies. Rows are blanked out of the INPUT
+        before body scrubbing, not out of the scrubbed output, where a
+        multi-line link opening on a row can relocate a following line's prose
+        onto the masked row and silently drop its finding (found 2026-08-13,
+        PR #46 verification; earlier, classifying the mask on the raw line
+        while the walk saw the stripped one linted markup-prefixed rows
+        twice).
+
+        A masked row becomes a bare "." rather than an empty line. Every tier
+        pattern's bridging classes exclude ".", and "." is not whitespace, so
+        no match can CROSS a masked row: an empty line was regex-transparent,
+        and patterns whose classes admit newlines stitched the lines around a
+        masked row into a finding the rendered document does not contain
+        (2026-08-13, round seven). The "." is not inert, though, and this
+        comment once said it was: a pattern that opens at a sentence
+        terminator, ``rhetorical_self_question``, can START on it. That match
+        is right, since a table does end the sentence before the prose after
+        it, but it was reported on the row's line with the "." in its excerpt.
+        The lead-in rule below is what fixes that.
+
+    WHERE A FINDING IS REPORTED
+        A pattern may begin with the terminator and whitespace that end the
+        PREVIOUS sentence (``rhetorical_self_question`` does). The line and
+        excerpt start after that lead-in, so the finding lands on the line
+        holding the flagged words, not the line before.
+
+    Cell prose goes through the same ``scrub`` as body prose, so
+    ``**isn't**`` in a cell is caught exactly as in a paragraph. Two accepted
     imperfections, both toward under-counting, the safe direction: a
-    trailing-pipe row prefixed by an HTML tag is a row to neither pass
-    (the tag survives ``strip_code``) yet still blanked by scrub's
-    TABLE_ROW_RE once the tag is stripped, so its cells go unlinted; and
-    a pipe-led lazy continuation line of a paragraph — which CommonMark
-    renders as prose, there being no delimiter row — is treated as a
-    table row, so a tic spanning the wrap, or cut in half by that line's
-    own unescaped pipes, goes uncounted. Telling that line from a
-    delimiter-less table needs paragraph context the line-based walk
-    deliberately does not model (modelling it would change the em-dash
-    hook's verdicts on chat-message tables).
+    trailing-pipe row prefixed by an HTML tag is a row to neither pass (the
+    tag survives ``strip_code``) yet still blanked by scrub's TABLE_ROW_RE
+    once the tag is stripped, so its cells go unlinted; and a pipe-led lazy
+    continuation line of a paragraph, which CommonMark renders as prose,
+    there being no delimiter row, is treated as a table row, so a tic
+    spanning the wrap, or cut in half by that line's own unescaped pipes,
+    goes uncounted. Telling that line from a delimiter-less table needs
+    paragraph context the line-based walk deliberately does not model
+    (modelling it would change the em-dash hook's verdicts on chat-message
+    tables).
     """
     raw_lines = text.split("\n")
-    stripped_lines = emdash.strip_code(text).split("\n")
-    # A masked row becomes a bare terminator, not an empty line: every
-    # tier pattern's bridging classes exclude ".", and "." is not
-    # whitespace, so no match can cross a masked row in either direction
-    # — an empty line was regex-transparent, and patterns whose classes
-    # admit newlines stitched the lines around a masked row into a
-    # finding the rendered document does not contain (2026-08-13, PR #46
-    # verification, round seven). "." can neither start nor complete any
-    # pattern, so it can appear in no excerpt.
+    stripped = emdash.strip_code(text)
     body_input = "\n".join(
-        "." if emdash.is_table_row(stripped) else raw
-        for raw, stripped in zip(raw_lines, stripped_lines))
+        "." if emdash.is_table_row(plain) else raw
+        for raw, plain in zip(raw_lines, stripped.split("\n")))
     body = voice_tics.scrub(body_input, keep_lines=True)
     out: List[Finding] = []
-    for key, tier, rx, why in tiers:
+    for rule, tier, rx, why in rows:
         for m in rx.finditer(body):
+            lead = _lead_in(m.group(0))
             out.append(Finding(
-                rule=key,
+                rule=rule,
                 tier=tier,
-                line=_line_of(m.start(), body),
-                excerpt=_excerpt(m.group(0)),
+                line=_line_of(m.start() + lead, body),
+                excerpt=_excerpt(m.group(0)[lead:]),
                 why=why,
             ))
-    for row_line, cell, is_cell in emdash.numbered_blocks(
-            emdash.strip_code(text)):
+    for row_line, cell, is_cell in emdash.numbered_blocks(stripped):
         if not is_cell:
             continue
         prose = voice_tics.scrub(cell)
-        for key, tier, rx, why in tiers:
+        for rule, tier, rx, why in rows:
             for m in rx.finditer(prose):
+                lead = _lead_in(m.group(0))
                 out.append(Finding(
-                    rule=key,
+                    rule=rule,
                     tier=tier,
                     line=row_line,
-                    excerpt=_excerpt(m.group(0)),
+                    excerpt=_excerpt(m.group(0)[lead:]),
                     why=why,
                 ))
     return out
+
+
+def _lead_in(matched: str) -> int:
+    """Length of the sentence terminators and whitespace a match opens with.
+
+    Zero when that would be the whole match, so a rule made of punctuation
+    still reports what it matched.
+    """
+    lead = len(matched) - len(matched.lstrip(".!?" + " \t\n\r\f\v\u2029"))
+    return lead if lead < len(matched) else 0
 
 
 def _emdash_findings(text: str, exempt: str = "") -> List[Finding]:
@@ -274,29 +306,21 @@ def banned_pattern(phrase: str) -> Pattern[str]:
     return re.compile(lead + body + tail, re.IGNORECASE)
 
 
-def _banned_findings(text: str,
-                     banned: Sequence[Tuple[str, str, str]]) -> List[Finding]:
-    """Findings for the reader's own banned phrases.
+def banned_rows(banned: Sequence[Tuple[str, str, str]]) -> List[Row]:
+    """The reader's own banned phrases as rows for ``_pattern_findings``.
 
-    Separate from the measured tics on purpose. These carry no ratio and claim
-    nothing about how a model writes; they are one person saying they do not
-    want to read a phrase, which is a perfectly good reason and a different
-    kind of claim. Keeping them apart is what stops a preference from being
-    read later as evidence.
+    Separate rules from the measured tics on purpose. These carry no ratio and
+    claim nothing about how a model writes; they are one person saying they do
+    not want to read a phrase, which is a perfectly good reason and a
+    different kind of claim. Keeping them apart, by rule name and by config
+    key, is what stops a preference from being read later as evidence.
     """
-    prose = voice_tics.scrub(text, keep_lines=True)
-    out: List[Finding] = []
+    rows: List[Row] = []
     for phrase, instead, tier in banned:
         why = f"banned phrase; instead: {instead}" if instead else "banned phrase"
-        for m in banned_pattern(phrase).finditer(prose):
-            out.append(Finding(
-                rule=f"banned:{' '.join(config_mod.banned_words(phrase.lower()))}",
-                tier=tier,
-                line=_line_of(m.start(), prose),
-                excerpt=_excerpt(m.group(0)),
-                why=why,
-            ))
-    return out
+        rule = f"banned:{' '.join(config_mod.banned_words(phrase.lower()))}"
+        rows.append((rule, tier, banned_pattern(phrase), why))
+    return rows
 
 
 def _stats(text: str) -> Dict[str, float]:
@@ -322,8 +346,8 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
             the em-dash rule off, which is what an unconfigured run gets.
     """
     cfg = cfg or config_mod.Config.default()
-    tiers = tier_patterns(cfg.error_tics, cfg.warn_tics)
-    found = _tic_findings(text, tiers) + _banned_findings(text, cfg.banned)
+    rows = list(tier_patterns(cfg.error_tics, cfg.warn_tics))
+    found = _pattern_findings(text, rows + banned_rows(cfg.banned))
     if cfg.emdash_enabled:
         found += _emdash_findings(text, cfg.emdash_exempt)
     found.sort(key=lambda f: (f.line is None, f.line or 0, f.rule))

@@ -213,6 +213,19 @@ your transcripts.**
   pass blanks it once the tag is stripped. Telling it apart needs markup
   context the line-based walk does not model. The miss is toward
   undercounting.
+- Fenced code (backticks or tildes, at any indentation, LF or CRLF) is
+  skipped. An *indented* code block, four spaces after a blank line with no
+  fence, is linted as prose: inside a list item the same indentation is an
+  ordinary continuation paragraph, and telling them apart needs list context
+  the line-based walk does not model.
+- Table rows are recognised by a leading pipe. A GFM table written without
+  outer pipes is linted as prose, so with the em-dash rule on, a glossary row
+  like `AGC — Atlassian Government Cloud | yes` in such a table is reported.
+- With the em-dash rule on, a lone dash in a table cell is excused when the
+  text before it looks like a label (up to sixty characters, no sentence
+  punctuation). `Read the SOW first — it changes the severity` in a cell has
+  that shape, and counting dashes cannot tell a term from a clause. A matched
+  pair in a cell is never reported.
 - Chat-register tics (`let_me`, `i_should_note`) are measured but are useless
   for linting documents, because they cannot appear in one. `prose_lint` does
   not carry them: a linter that did would report clean runs as a property of

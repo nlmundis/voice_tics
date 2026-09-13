@@ -21,6 +21,13 @@ WHAT IT DOES NOT CATCH
     A matched pair used where a colon would read better. That is style, not
     the stated rule, and counting dashes cannot tell the difference.
 
+    A lone dash in a TABLE CELL whose first sixty characters hold no
+    sentence punctuation. "Read the SOW first — it changes the severity" in a
+    cell has the shape of "AGC — Atlassian Government Cloud", and telling a
+    term from a clause is not a counting job. The label exemption is applied
+    only when it fixes an odd count, so it cannot make a matched pair in a
+    cell into a violation; it can still excuse a clause.
+
 TWO EXEMPTIONS, BOTH NARROW ON PURPOSE
     A leading ``term — definition`` separator in a TABLE CELL is a label
     rather than a clause join, and is never counted. Table cells only: see
@@ -44,14 +51,11 @@ from typing import Iterator, List, Tuple
 
 EM_DASH = "—"
 
-# Anchored to line starts like voice_tics.CODE_FENCE_RE, and for the same
-# two reasons: a mid-line ``` run is literal text per CommonMark, and the
-# two modules' renderings must agree about what a fence is — prose_lint
-# partitions lines into body and table passes using THIS module's
-# stripping, so a fence definition that disagrees with scrub's reopens
-# the double-lint/silent-drop seam (2026-08-13, PR #46 verification).
-FENCE_RE = re.compile(r"^[ \t]{0,3}```.*?\n[ \t]{0,3}```[ \t]*$",
-                      re.S | re.M)
+# Whitespace a fence line may be indented with. The no-break space is here
+# because voice_tics.scrub folds it to a space before scanning and
+# strip_code does not; without it the two renderings disagreed about an
+# NBSP-indented fence and code inside it was linted as a table cell.
+FENCE_INDENT = " \t\u00a0"
 # Nonempty spans only, matching voice_tics.INLINE_CODE_RE exactly. "``" is
 # literal text in CommonMark, not a code span, and stripping it here while
 # voice_tics kept it made the two renderings disagree about whether a
@@ -138,6 +142,65 @@ def exempt_spans(block: str, exempt: str = "") -> List[Tuple[int, int]]:
         return []
 
 
+def fence_spans(text: str) -> List[Tuple[int, int]]:
+    """The fenced code blocks in ``text``, found in one pass over its lines.
+
+    THE single definition of a fence for this repo: ``voice_tics.scrub`` and
+    ``strip_code`` both call it, because prose_lint partitions lines into body
+    and table passes using this module's stripping, and two definitions that
+    disagree reopen the double-lint/silent-drop seam (2026-08-13, PR #46).
+
+    WHAT COUNTS AS A FENCE
+        An opening line is a run of three or more backticks or tildes, after
+        any indentation. A backtick opener's info string may not contain a
+        backtick, so "```x``` is the inline form" is a paragraph, as in
+        CommonMark. The fence closes at the first later line that is a run of
+        the SAME character at least as long as the opener's, with nothing
+        after it but whitespace, so a four-backtick fence can show a
+        three-backtick one inside it. A trailing carriage return is
+        whitespace, so a CRLF document behaves like an LF one.
+
+    WHERE IT DELIBERATELY DIFFERS FROM COMMONMARK
+        Indentation is not capped at three spaces. CommonMark measures that
+        cap from the containing block, so inside a list item a fence indented
+        four spaces is still a fence, and telling that from an indented code
+        block needs list context this scan does not model; either way the
+        lines are code. An unclosed fence is NOT treated as running to the
+        end of the document: it is left as text, so an accidental opener
+        cannot silently delete the rest of a document from the lint.
+
+    It is linear: each line is examined once, and nothing is rescanned. The
+    regex it replaced was lazy and multiline, so on unclosed fences it
+    restarted at every opening line and scanned to the end each time,
+    measured at 3.160 seconds for 8,000 such lines.
+
+    Args:
+        text: Raw markdown or chat text.
+
+    Returns:
+        Ascending, non-overlapping (start, end) offsets. Each span runs from
+        the start of the opening line to the end of the closing line, not
+        including its newline.
+    """
+    spans: List[Tuple[int, int]] = []
+    opener: Tuple[int, str, int] = (0, "", 0)  # start, character, run length
+    offset = 0
+    for line in text.split("\n"):
+        end = offset + len(line)
+        body = line.lstrip(FENCE_INDENT)
+        char = body[:1]
+        run = len(body) - len(body.lstrip(char)) if char in ("`", "~") else 0
+        if not opener[1]:
+            if run >= 3 and (char == "~" or "`" not in body[run:]):
+                opener = (offset, char, run)
+        elif (char == opener[1] and run >= opener[2]
+              and not body[run:].strip(FENCE_INDENT + "\r")):
+            spans.append((opener[0], end))
+            opener = (0, "", 0)
+        offset = end + 1
+    return spans
+
+
 def strip_code(text: str) -> str:
     """Blank out fenced blocks and inline code spans, preserving line count.
 
@@ -151,8 +214,14 @@ def strip_code(text: str) -> str:
     Returns:
         The text with code blanked and its line count unchanged.
     """
-    text = FENCE_RE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
-    return INLINE_CODE_RE.sub(" ", text)
+    out: List[str] = []
+    last = 0
+    for start, end in fence_spans(text):
+        out.append(text[last:start])
+        out.append("\n" * text.count("\n", start, end))
+        last = end
+    out.append(text[last:])
+    return INLINE_CODE_RE.sub(" ", "".join(out))
 
 
 def is_table_row(line: str) -> bool:
@@ -248,7 +317,11 @@ def lone_dash_lines(text: str, exempt: str = ""
         # label exception then swallowed up to 60 further characters of the
         # writer's own prose, dash included (2026-08-14 review).
         spans = exempt_spans(blk, exempt)
-        if is_cell:
+        # The label exemption removes one dash, so it can only ever be right
+        # when the count is ODD: a label cell has one dash. Applied to an even
+        # count it turned a correct matched pair in a cell into a violation,
+        # the very inversion LEAD_TERM_RE's comment describes for prose.
+        if is_cell and blank(blk, spans).count(EM_DASH) % 2 == 1:
             label = LEAD_TERM_RE.match(blk)
             if label:
                 spans = spans + [(label.start(), label.end())]
