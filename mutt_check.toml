@@ -281,7 +281,7 @@ why = "On 3.9 and 3.10 there is no tomllib; a module-scope import kills both ent
 suites = ["tests.test_repo.StdlibOnlyTest"]
 file = "vt_config.py"
 find = 'CONFIG_NAME = "voice_tics.toml"'
-replace = "import tomllib\nCONFIG_NAME = \"voice_tics.toml\""
+replace = "try:\n    import tomllib\nexcept ImportError:\n    import tomli as tomllib\nCONFIG_NAME = \"voice_tics.toml\""
 
 [[mutant]]
 name = "suite_reads_the_developers_own_config"
