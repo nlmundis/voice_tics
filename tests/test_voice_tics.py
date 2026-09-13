@@ -1,0 +1,750 @@
+"""Tests for voice_tics.py.
+
+Run with:
+    python3 -m unittest discover tests -v
+
+The contamination cases here are regression tests, not hypotheticals. Both were
+found by running the scan and reading a result that was obviously wrong:
+
+* The first model-direction run ranked "you've hit your" as a top-30 tic at
+  113x and put it second in the opener table. It is the harness's rate-limit
+  notice stored in an assistant record, not prose the model composed.
+* The first baseline-direction run ranked "execute autonomously without asking
+  clarifying questions", "is an automated run" and "task the user is not
+  present" as the human's top tics at ~364x. Those come from recurring
+  scheduled-task prompts, logged as user records. 130 of 222 sessions in the
+  45-day window turned out to be scheduled runs.
+
+Both would have been reported as findings with a number attached, which is the
+failure this suite exists to prevent: a measured-looking number sourced from the
+harness rather than from a speaker.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+from typing import Any, Dict, List
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import voice_tics as vt  # noqa: E402
+
+
+def _rec(kind: str, text: str, *, sidechain: bool = False,
+         blocks: Any = None, meta: bool = False,
+         model: str | None = None,
+         ts: str = "2026-08-12T10:00:00.000Z") -> str:
+    """One transcript line as the harness writes it."""
+    content: Any
+    if blocks is not None:
+        content = blocks
+    elif kind == "assistant":
+        content = [{"type": "text", "text": text}]
+    else:
+        content = text
+    rec: Dict[str, Any] = {
+        "type": kind,
+        "isSidechain": sidechain,
+        "timestamp": ts,
+        "message": {"role": kind, "content": content},
+    }
+    if meta:
+        rec["isMeta"] = True
+    if model is not None:
+        rec["message"]["model"] = model
+    return json.dumps(rec)
+
+
+def _session(lines: List[str], tmp: pathlib.Path, name: str = "s.jsonl") -> str:
+    """Write transcript lines to a file and return its path."""
+    path = tmp / name
+    path.write_text("\n".join(lines) + "\n")
+    return str(path)
+
+
+class ScrubTest(unittest.TestCase):
+    """scrub() must leave prose and remove everything that is not prose."""
+
+    def test_strips_fenced_code(self) -> None:
+        got = vt.scrub("before\n```python\nlet me = 1\n```\nafter")
+        self.assertNotIn("let me", got)
+        self.assertIn("before", got)
+        self.assertIn("after", got)
+
+    def test_strips_inline_code_and_urls_and_paths(self) -> None:
+        got = vt.scrub("see `let me` at https://x.com/let/me and ~/a/b/let_me.py")
+        self.assertNotIn("let me", got)
+        self.assertNotIn("x.com", got)
+        self.assertNotIn("let_me.py", got)
+
+    def test_keeps_link_text_drops_target(self) -> None:
+        got = vt.scrub("read [the findings](https://example.com/let/me)")
+        self.assertIn("the findings", got)
+        self.assertNotIn("example.com", got)
+
+    def test_keeps_wikilink_text(self) -> None:
+        self.assertIn("Writing Style", vt.scrub("see [[Writing Style]]"))
+        self.assertIn("Writing Style", vt.scrub("see [[Resources|Writing Style]]"))
+
+    def test_strips_markdown_layout_not_words(self) -> None:
+        got = vt.scrub("## Heading\n- **bold** item\n> quoted\n")
+        for token in ("#", "-", "**", ">"):
+            self.assertNotIn(token, got)
+        for word in ("Heading", "bold", "item", "quoted"):
+            self.assertIn(word, got)
+
+
+class TokeniseTest(unittest.TestCase):
+    """words() and sentences() define every rate in the report."""
+
+    def test_words_are_lowercased_alpha(self) -> None:
+        self.assertEqual(vt.words("Let ME check 42 times!"),
+                         ["let", "me", "check", "times"])
+
+    def test_sentences_split_on_terminals_and_newlines(self) -> None:
+        self.assertEqual(len(vt.sentences("One. Two! Three?")), 3)
+        self.assertEqual(len(vt.sentences("One\nTwo\n\nThree")), 3)
+
+    def test_blank_input_yields_nothing(self) -> None:
+        self.assertEqual(vt.sentences("   \n  "), [])
+        self.assertEqual(vt.words(""), [])
+
+
+class UserTextTest(unittest.TestCase):
+    """Only prose the human actually typed may enter the baseline corpus."""
+
+    def test_plain_string_passes(self) -> None:
+        self.assertEqual(vt._user_text("just do it"), "just do it")
+
+    def test_harness_furniture_is_dropped(self) -> None:
+        for noisy in ("<system-reminder>stuff</system-reminder>",
+                      "<command-name>/model</command-name>",
+                      "UserPromptSubmit hook success: ...",
+                      "[Request interrupted by user]"):
+            self.assertIsNone(vt._user_text(noisy), noisy)
+
+    def test_tool_result_blocks_are_dropped_wholesale(self) -> None:
+        blocks = [{"type": "tool_result", "content": "output"}]
+        self.assertIsNone(vt._user_text(blocks))
+
+    def test_list_of_text_blocks_passes(self) -> None:
+        """The majority shape of real user records: typed prose arrives as
+        [{'type': 'text', ...}] blocks, not a bare string. This branch was
+        previously covered by no test at all."""
+        blocks = [{"type": "text", "text": "one"},
+                  {"type": "text", "text": "two"}]
+        self.assertEqual(vt._user_text(blocks), "one\ntwo")
+
+    def test_image_with_caption_keeps_the_typed_text(self) -> None:
+        """Regression: ANY non-text block used to drop the whole record, so
+        the caption the human typed beside a screenshot was silently lost from
+        his baseline."""
+        blocks = [{"type": "image", "source": {"type": "base64"}},
+                  {"type": "text", "text": "here are the modes"}]
+        self.assertEqual(vt._user_text(blocks), "here are the modes")
+
+    def test_image_only_record_yields_nothing(self) -> None:
+        self.assertIsNone(vt._user_text([{"type": "image", "source": {}}]))
+
+    def test_tool_result_beside_text_still_drops_wholesale(self) -> None:
+        """A tool round-trip is machine output end to end even when a text
+        block rides along; only non-tool blocks get the skip treatment."""
+        blocks = [{"type": "tool_result", "content": "output"},
+                  {"type": "text", "text": "words"}]
+        self.assertIsNone(vt._user_text(blocks))
+
+    def test_empty_is_dropped(self) -> None:
+        self.assertIsNone(vt._user_text("   "))
+        self.assertIsNone(vt._user_text(None))
+
+
+class AssistantTextTest(unittest.TestCase):
+    """Only prose the model composed may enter its corpus."""
+
+    def test_text_blocks_are_joined(self) -> None:
+        blocks = [{"type": "text", "text": "one"}, {"type": "text", "text": "two"}]
+        self.assertEqual(vt._assistant_text(blocks), "one\ntwo")
+
+    def test_thinking_is_excluded(self) -> None:
+        blocks = [{"type": "thinking", "thinking": "hidden reasoning"},
+                  {"type": "text", "text": "visible"}]
+        self.assertEqual(vt._assistant_text(blocks), "visible")
+
+    def test_thinking_only_record_yields_nothing(self) -> None:
+        self.assertIsNone(vt._assistant_text([{"type": "thinking",
+                                               "thinking": "x"}]))
+
+    def test_rate_limit_notice_is_not_voice(self) -> None:
+        """Regression: 'you've hit your' ranked as a top-30 tic at 113x."""
+        blocks = [{"type": "text",
+                   "text": "You've hit your usage limit. Resets at 3pm."}]
+        self.assertIsNone(vt._assistant_text(blocks))
+
+
+class ReadTurnsTest(unittest.TestCase):
+    """Session-level filtering, which is where both contaminations were fixed."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_reads_both_roles(self) -> None:
+        path = _session([_rec("user", "do the thing"),
+                         _rec("assistant", "Let me check.")], self.tmp)
+        turns = list(vt.read_turns([path]))
+        self.assertEqual([t.role for t in turns], ["user", "assistant"])
+
+    def test_sidechain_is_skipped(self) -> None:
+        path = _session([_rec("assistant", "subagent prose", sidechain=True),
+                         _rec("assistant", "main prose")], self.tmp)
+        turns = list(vt.read_turns([path]))
+        self.assertEqual(len(turns), 1)
+        self.assertIn("main prose", turns[0].text)
+
+    def test_scheduled_run_drops_the_whole_session(self) -> None:
+        """Regression: scheduled prompts ranked as the human's top tics at 364x.
+
+        The model's replies in that session must go too. They are addressed to
+        a log rather than to a reader, so keeping them would clean his corpus
+        by corrupting the model's.
+        """
+        path = _session([
+            _rec("user", "This is an automated run; the user is not present."),
+            _rec("assistant", "Now the brief is written."),
+        ], self.tmp)
+        stats: Dict[str, int] = {}
+        turns = list(vt.read_turns([path], stats=stats))
+        self.assertEqual(turns, [])
+        self.assertEqual(stats["automated_sessions"], 1)
+        self.assertEqual(stats["sessions"], 1)
+
+    def test_interactive_session_is_kept_and_counted(self) -> None:
+        path = _session([_rec("user", "go"), _rec("assistant", "Done.")],
+                        self.tmp)
+        stats: Dict[str, int] = {}
+        list(vt.read_turns([path], stats=stats))
+        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        self.assertEqual(stats["turns"], 2)
+
+    def test_unreadable_and_malformed_lines_do_not_raise(self) -> None:
+        path = _session(["{not json", _rec("user", "ok")], self.tmp)
+        self.assertEqual(len(list(vt.read_turns([path, "/nope/missing.jsonl"]))),
+                         1)
+
+    def test_non_object_json_line_does_not_kill_the_session(self) -> None:
+        """Regression: '"a string"' is valid JSON, and .get() on it raised
+        AttributeError, silently losing every session after the bad line."""
+        path = _session(['"just a string"', "[1, 2, 3]", "17",
+                         _rec("user", "still here")], self.tmp)
+        turns = list(vt.read_turns([path]))
+        self.assertEqual(len(turns), 1)
+        self.assertIn("still here", turns[0].text)
+
+    def test_meta_user_record_is_excluded_and_counted(self) -> None:
+        """Regression: isMeta records were 55% of the human's baseline by word
+        count, compressing every ratio toward 1."""
+        path = _session([
+            _rec("user", "expanded slash command boilerplate", meta=True),
+            _rec("user", "the words he actually typed"),
+        ], self.tmp)
+        stats: Dict[str, int] = {}
+        turns = list(vt.read_turns([path], stats=stats))
+        self.assertEqual(len(turns), 1)
+        self.assertIn("actually typed", turns[0].text)
+        self.assertEqual(stats["meta_records"], 1)
+
+    def test_synthetic_assistant_record_is_always_dropped(self) -> None:
+        path = _session([
+            _rec("assistant", "harness stand-in text", model="<synthetic>"),
+            _rec("assistant", "real prose", model="claude-fable-5"),
+        ], self.tmp)
+        stats: Dict[str, int] = {}
+        turns = list(vt.read_turns([path], stats=stats))
+        self.assertEqual([t.text for t in turns], ["real prose"])
+        self.assertEqual(stats["synthetic_records"], 1)
+
+    def test_model_filter_keeps_matching_assistant_and_every_user(self) -> None:
+        """--model filters the model's side only: the baseline is the human's,
+        whichever model he was talking to."""
+        path = _session([
+            _rec("user", "go"),
+            _rec("assistant", "opus prose", model="claude-opus-5"),
+            _rec("assistant", "fable prose", model="claude-fable-5"),
+        ], self.tmp)
+        stats: Dict[str, int] = {}
+        turns = list(vt.read_turns([path], stats=stats, model="fable"))
+        self.assertEqual([t.text for t in turns], ["go", "fable prose"])
+        self.assertEqual(stats["model_filtered"], 1)
+
+    def test_list_shaped_user_record_is_read(self) -> None:
+        """Most real user records carry their prose as a block list, not a
+        bare string; the fixture's bare-string default masked that shape."""
+        path = _session([_rec("user", "", blocks=[
+            {"type": "text", "text": "typed as a block list"}])], self.tmp)
+        turns = list(vt.read_turns([path]))
+        self.assertEqual(len(turns), 1)
+        self.assertIn("typed as a block list", turns[0].text)
+
+    def test_since_cutoff_keeps_only_newer_turns(self) -> None:
+        """Regression gap: inverting the cutoff comparison — keeping only
+        turns OLDER than the window — previously survived the whole suite."""
+        path = _session([
+            _rec("user", "the old words", ts="2026-08-01T10:00:00.000Z"),
+            _rec("user", "the new words", ts="2026-08-12T10:00:00.000Z"),
+        ], self.tmp)
+        since = dt.datetime(2026, 8, 5, tzinfo=dt.timezone.utc)
+        turns = list(vt.read_turns([path], since=since))
+        self.assertEqual([t.text for t in turns], ["the new words"])
+
+    def test_parse_when_reads_iso_z_and_rejects_garbage(self) -> None:
+        self.assertEqual(
+            vt._parse_when({"timestamp": "2026-08-12T10:00:00.000Z"}),
+            dt.datetime(2026, 8, 12, 10, 0, tzinfo=dt.timezone.utc))
+        self.assertIsNone(vt._parse_when({"timestamp": "yesterday"}))
+        self.assertIsNone(vt._parse_when({"timestamp": 1723456789}))
+        self.assertIsNone(vt._parse_when({}))
+
+    def test_transcripts_decode_as_utf8_whatever_the_locale(self) -> None:
+        """Transcripts are UTF-8 by contract, not by locale. Without an
+        explicit encoding, a non-UTF-8 locale decodes the curly apostrophe
+        to replacement garbage, SMART_PUNCT never folds it, and the
+        contraction detectors silently go dark — the same regression class
+        the smart-punctuation fold itself fixed. The subprocess is the only
+        honest probe: macOS auto-enables UTF-8 mode under a C locale, so
+        PYTHONUTF8=0 must be set explicitly to reproduce the bad locale."""
+        rec = {
+            "type": "assistant",
+            "isSidechain": False,
+            "timestamp": "2026-08-12T10:00:00.000Z",
+            "message": {"role": "assistant", "model": "claude-fable-5",
+                        "content": [{"type": "text",
+                                     "text": "It’s not a bug, it’s a flaw."}]},
+        }
+        path = self.tmp / "curly.jsonl"
+        # ensure_ascii=False so the raw curly-quote BYTES land in the file;
+        # json.dumps' default \\u2019 escape is plain ASCII and decodes
+        # identically under every codec, which would prove nothing.
+        path.write_text(json.dumps(rec, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+        code = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "import voice_tics as vt; "
+            "turns = list(vt.read_turns([sys.argv[2]])); "
+            "print(vt.structure_counts(turns[0].text)['not_x_but_y'])"
+        )
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ, PYTHONUTF8="0", LC_ALL="C", LANG="C")
+        got = subprocess.run([sys.executable, "-c", code, repo, str(path)],
+                             env=env, capture_output=True, text=True)
+        self.assertEqual(got.stdout.strip(), "1", got.stderr)
+
+
+class NgramTest(unittest.TestCase):
+    """Phrase ranking mechanics."""
+
+    def test_ngrams_windows(self) -> None:
+        self.assertEqual(list(vt.ngrams(["a", "b", "c"], 2)),
+                         [("a", "b"), ("b", "c")])
+
+    def test_ngrams_shorter_than_width_yields_nothing(self) -> None:
+        self.assertEqual(list(vt.ngrams(["a"], 3)), [])
+
+    def test_subsumed_phrases_are_dropped(self) -> None:
+        """'let me check' and 'me check' are one habit, not two findings."""
+        long_f = vt.Finding("let me check", 3, 100, 10.0, 0, 0.1, 100.0)
+        short_f = vt.Finding("me check", 2, 100, 10.0, 0, 0.1, 100.0)
+        kept = vt._drop_subsumed([long_f, short_f])
+        self.assertEqual([f.phrase for f in kept], ["let me check"])
+
+    def test_distinct_phrase_survives(self) -> None:
+        a = vt.Finding("let me check", 3, 100, 10.0, 0, 0.1, 100.0)
+        b = vt.Finding("say the word", 3, 90, 9.0, 0, 0.1, 90.0)
+        self.assertEqual(len(vt._drop_subsumed([a, b])), 2)
+
+    def test_containment_respects_word_boundaries(self) -> None:
+        """Regression: raw substring matching dropped 'own the' as
+        "contained" in 'down the', and 'in the' inside 'within the' —
+        different habits, silently merged."""
+        down = vt.Finding("down the", 2, 30, 10.0, 0, 0.1, 120.0)
+        own = vt.Finding("own the", 2, 35, 9.0, 0, 0.1, 110.0)
+        self.assertEqual([f.phrase for f in vt._drop_subsumed([down, own])],
+                         ["down the", "own the"])
+        within = vt.Finding("within the", 2, 30, 10.0, 0, 0.1, 120.0)
+        in_the = vt.Finding("in the", 2, 30, 9.0, 0, 0.1, 110.0)
+        self.assertEqual(
+            [f.phrase for f in vt._drop_subsumed([within, in_the])],
+            ["within the", "in the"])
+
+    def test_much_more_frequent_shorter_phrase_survives(self) -> None:
+        """The 1.35 count guard: a contained phrase used far more often than
+        its container is its own habit, not a window onto it."""
+        long_f = vt.Finding("let me check", 3, 100, 10.0, 0, 0.1, 100.0)
+        short_hot = vt.Finding("let me", 2, 200, 20.0, 0, 0.1, 90.0)
+        self.assertEqual(
+            [f.phrase for f in vt._drop_subsumed([long_f, short_hot])],
+            ["let me check", "let me"])
+
+    def test_equal_ratio_ladder_collapses_to_the_longest_phrase(self) -> None:
+        """Regression: a fixed phrase against a zero baseline produces every
+        window of itself at the SAME ratio and count. The stable sort left
+        the width-2 windows ranked first, and _drop_subsumed never drops a
+        longer phrase into a shorter kept one, so one habit filled ten of
+        the top-N rows. Ties must rank longest-first so the windows collapse
+        into the phrase that contains them."""
+        mine, theirs = vt.Corpus("m"), vt.Corpus("n")
+        fillers = ("ax bx cx dx ex fx gx hx ix jx "
+                   "kx lx mx nx ox px qx rx sx tx").split()
+        mine.add(" ".join(f"let me verify the counts {w}" for w in fillers))
+        theirs.add("an unrelated baseline entirely.")
+        got = vt.rank_phrases(mine, theirs, min_count=5, top=50)
+        self.assertEqual([f.phrase for f in got],
+                         ["let me verify the counts"])
+
+    def test_min_count_excludes_rare_phrases(self) -> None:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("n")
+        mine.add("alpha beta. " * 3)
+        theirs.add("something else entirely.")
+        self.assertEqual(vt.rank_phrases(mine, theirs, min_count=10, top=20), [])
+        self.assertTrue(vt.rank_phrases(mine, theirs, min_count=2, top=20))
+
+
+class CorpusTest(unittest.TestCase):
+    """Rates and openers."""
+
+    def test_rate_is_per_ten_thousand_words(self) -> None:
+        c = vt.Corpus("x")
+        c.add(" ".join(["word"] * 1000))
+        self.assertAlmostEqual(c.rate(1), 10.0, places=6)
+
+    def test_empty_corpus_rates_zero_not_error(self) -> None:
+        c = vt.Corpus("x")
+        self.assertEqual(c.rate(5), 0.0)
+        self.assertEqual(c.mean_sentence_len(), 0.0)
+
+    def test_opener_is_first_three_words_of_first_sentence(self) -> None:
+        c = vt.Corpus("x")
+        c.add("Let me check the file. Then something else.")
+        self.assertEqual(c.openers.most_common(1)[0][0], "let me check")
+
+
+class PatternTest(unittest.TestCase):
+    """The named structure and signature detectors."""
+
+    def test_let_me_structure_fires(self) -> None:
+        self.assertEqual(vt.structure_counts("Let me check that.")["let_me"], 1)
+        self.assertEqual(vt.structure_counts("Now updating it.")["let_me"], 0)
+
+    def test_not_x_but_y_fires(self) -> None:
+        got = vt.structure_counts("It's not just a bug, it's a design flaw.")
+        self.assertGreaterEqual(got["not_x_but_y"], 1)
+
+    def test_curly_apostrophe_counts_same_as_straight(self) -> None:
+        """Regression: not_x_but_y scored 0 on the U+2019 form of a sentence
+        it scored 1 on with a straight apostrophe, and macOS emits curly by
+        default. scrub() folds smart punctuation before any pattern runs."""
+        curly = "It’s not a bug, it’s a flaw."
+        got = vt.structure_counts(vt.scrub(curly))
+        self.assertEqual(got["not_x_but_y"], 1)
+
+    def test_i_should_note_matches_contraction_and_will(self) -> None:
+        """Regression: '\\bi\\s+'?ll' could never match "I'll" (no space
+        before the contraction), and "will" was missing entirely."""
+        for phrase in ("I'll flag the risk.", "I will note the gap.",
+                       "I should mention one thing."):
+            self.assertEqual(
+                vt.structure_counts(phrase)["i_should_note"], 1, phrase)
+        self.assertEqual(
+            vt.structure_counts("I will do it now.")["i_should_note"], 0)
+
+    def test_ultimately_fires_signposted_conclusion(self) -> None:
+        """Regression: ',\\b' after 'ultimately' never matched — a word
+        boundary after a comma needs a word character next, and prose puts a
+        space there."""
+        got = vt.structure_counts("Ultimately, the fix held.")
+        self.assertEqual(got["signposted_conclusion"], 1)
+        self.assertEqual(
+            vt.structure_counts("In conclusion, done.")["signposted_conclusion"],
+            1)
+
+    def test_appositive_negation_ignores_participial_clauses(self) -> None:
+        """Regression: 'I asked, not knowing why' is grammar, not the tic."""
+        counts = vt.structure_counts("I asked, not knowing why.")
+        self.assertEqual(counts["appositive_negation"], 0)
+        self.assertGreaterEqual(
+            vt.structure_counts("It's a flaw, not a bug.")
+            ["appositive_negation"], 1)
+        self.assertGreaterEqual(
+            vt.structure_counts("We got there by measuring, not guessing.")
+            ["appositive_negation"], 1)
+
+    def test_not_x_but_y_matches_negative_contractions(self) -> None:
+        """Round-two regression: 'is\\s+not' cannot match inside "isn't", so
+        the contracted reveal — likely its majority surface form — scored
+        zero until the leading group spelled the contractions out."""
+        for s in ("The problem isn't the code, it's the config.",
+                  "These aren't bugs, they're features."):
+            self.assertEqual(vt.structure_counts(s)["not_x_but_y"], 1, s)
+
+    def test_appositive_dash_branch_ignores_compound_hyphens(self) -> None:
+        """Round-two regression: [—-] matched the hyphen INSIDE a compound
+        word, so 'not merely absent-minded' counted as the dash form."""
+        got = vt.structure_counts(
+            "The professor was not merely absent-minded; he forgot it.")
+        self.assertEqual(got["appositive_negation"], 0)
+        self.assertGreaterEqual(
+            vt.structure_counts("It is not just a bug — a design flaw.")
+            ["appositive_negation"], 1)
+
+    def test_appositive_negation_complement_heuristic(self) -> None:
+        """Round-two regression: a gerund WITH a complement is a participial
+        clause whatever the pre-comma word ends in (round one miscounted
+        'this morning, not knowing…'), and a -thing pronoun is a noun
+        whatever follows it."""
+        for clause in ("I woke up this morning, not knowing where I was.",
+                       "She kept running, not looking back even once.",
+                       "He said something, not realizing the mic was on."):
+            self.assertEqual(
+                vt.structure_counts(clause)["appositive_negation"], 0, clause)
+        for tic in ("This is deliberate, not something to fix.",
+                    "It was measured, not guessed."):
+            self.assertGreaterEqual(
+                vt.structure_counts(tic)["appositive_negation"], 1, tic)
+
+    def test_rule_of_three_counts_multiword_items(self) -> None:
+        """Regression: items were capped at one to two words, so a genuine
+        three-item list of short clauses did not count."""
+        got = vt.structure_counts(
+            "Read the file, run the query, and check the result.")
+        self.assertEqual(got["rule_of_three"], 1)
+        self.assertEqual(
+            vt.structure_counts("Just one, and two.")["rule_of_three"], 0)
+
+    def test_rule_of_three_comma_styles_count_in_separate_rows(self) -> None:
+        """Round three: both comma styles count, in disjoint rows. The
+        non-Oxford surface form measured ~90% clause coordination on the
+        live corpus, so widening rule_of_three itself would have poisoned a
+        precise count; the noisy form gets its own labelled row instead."""
+        ox = vt.structure_counts("It was fast, cheap, and good.")
+        no = vt.structure_counts("It was fast, cheap and good.")
+        self.assertEqual(ox["rule_of_three"], 1)
+        self.assertEqual(ox["rule_of_three_no_oxford"], 0)
+        self.assertEqual(no["rule_of_three"], 0)
+        self.assertEqual(no["rule_of_three_no_oxford"], 1)
+
+    def test_method_defence_requires_the_verb_not_the_noun(self) -> None:
+        """Regression: 'matters?' with the -s optional matched the NOUN in
+        'discuss this matter', counting a formal register as the tic,
+        inflating his baseline and understating the ratio."""
+        for noun in ("We will discuss this matter tomorrow.",
+                     "The committee reviewed this matter in June."):
+            self.assertEqual(
+                vt.structure_counts(noun)["method_defence"], 0, noun)
+        for verb in ("The gate is offline, which means that nothing runs.",
+                     "This matters because the baseline is his."):
+            self.assertEqual(
+                vt.structure_counts(verb)["method_defence"], 1, verb)
+
+    def test_signature_is_counted_case_insensitively(self) -> None:
+        got = vt.signature_counts("However, it works. however it is slow.",
+                                  [("however", r"\bhowever\b")])
+        self.assertEqual(got["however"], 2)
+
+    def test_signature_absent_scores_zero(self) -> None:
+        got = vt.signature_counts("plain text", [("herein", r"\bherein\b")])
+        self.assertEqual(got["herein"], 0)
+
+    def test_signatures_default_to_empty_not_to_someone_elses_habits(self) -> None:
+        """An unconfigured run must measure NO signatures.
+
+        The shipped table is deliberately empty: signature phrases are a claim
+        about one person's writing, and a default would present a stranger's
+        habits as yours. Pinned because a well-meaning "sensible default" here
+        is the exact regression that would make the tool wrong for everyone
+        who did not write it.
+        """
+        self.assertEqual(vt.BASELINE_SIGNATURES, ())
+        self.assertEqual(vt.signature_counts("However, herein, thus."), {})
+
+    def test_every_pattern_compiles_and_reports(self) -> None:
+        counts = vt.structure_counts("some prose")
+        self.assertEqual(set(counts), {n for n, _, _ in vt.STRUCTURE_PATTERNS})
+        table = [("alpha", r"\balpha\b"), ("beta", r"\bbeta\b")]
+        self.assertEqual(set(vt.signature_counts("some prose", table)),
+                         {"alpha", "beta"})
+
+
+class MainTest(unittest.TestCase):
+    """End-to-end, including the flip that --speaker performs."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._tmp.name)
+        _session([
+            _rec("user", "check the numbers however you like"),
+            _rec("assistant", "Let me check. Let me verify the counts."),
+        ], self.tmp)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_json_output_is_valid_and_labels_the_speaker(self) -> None:
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                          "--min-count", "1"])
+        self.assertEqual(rc, 0)
+        got = json.loads(buf.getvalue())
+        self.assertEqual(got["speaker"], "model")
+        self.assertIn("let_me", got["structures"])
+        self.assertEqual(got["structures"]["let_me"]["model"], 2)
+        # No config file, so no signatures are configured and the table is
+        # empty rather than absent: a consumer can tell "none configured"
+        # from "key withheld".
+        self.assertEqual(got["signatures"], {})
+
+    def test_configured_signatures_reach_the_json_table(self) -> None:
+        """The [baseline] signatures table must survive the whole pipeline."""
+        import io
+        import contextlib
+        cfg = self.tmp / "voice_tics.toml"
+        cfg.write_text('[baseline]\n'
+                       'signatures = [{name = "however", '
+                       'pattern = "\\\\bhowever\\\\b"}]\n',
+                       encoding="utf-8")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                          "--min-count", "1", "--config", str(cfg)])
+        self.assertEqual(rc, 0)
+        got = json.loads(buf.getvalue())
+        self.assertEqual(got["signatures"]["however"]["baseline"], 1)
+
+    def test_speaker_flip_keeps_structure_attribution(self) -> None:
+        """--speaker must swap which corpus is examined, not relabel counts.
+
+        The source-text gate is asserted per speaker too: the baseline
+        direction is the one where a leak would quote his own typed prose.
+        """
+        import io
+        import contextlib
+        for speaker in ("model", "baseline"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                         "--speaker", speaker, "--min-count", "1"])
+            got = json.loads(buf.getvalue())
+            self.assertEqual(got["structures"]["let_me"]["model"], 2, speaker)
+            self.assertEqual(got["structures"]["let_me"]["baseline"], 0, speaker)
+            self.assertNotIn("phrases", got, speaker)
+            self.assertNotIn("openers", got, speaker)
+
+    def test_speaker_flip_swaps_the_examined_corpus(self) -> None:
+        """Regression gap: with the flip made a no-op the structure
+        assertions above hold vacuously, because the structures table is
+        speaker-independent. The phrase table is built from ``mine``, so
+        under --speaker baseline it must quote HIS prose, not the model's."""
+        import io
+        import contextlib
+        expected = {"model": ("verify the counts", "the numbers"),
+                    "baseline": ("the numbers", "verify the counts")}
+        for speaker, (present, absent) in expected.items():
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                         "--speaker", speaker, "--min-count", "1",
+                         "--include-source-text"])
+            got = json.loads(buf.getvalue())
+            phrases = [f["phrase"] for f in got["phrases"]]
+            self.assertTrue(any(present in p for p in phrases), speaker)
+            self.assertFalse(any(absent in p for p in phrases), speaker)
+
+    def test_json_withholds_source_text_by_default(self) -> None:
+        """Fail safe: the keys carrying transcript fragments must be absent,
+        not empty, so 'withheld' cannot read as 'measured as zero'."""
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                          "--min-count", "1"])
+        self.assertEqual(rc, 0)
+        got = json.loads(buf.getvalue())
+        self.assertFalse(got["source_text_included"])
+        self.assertNotIn("phrases", got)
+        self.assertNotIn("openers", got)
+        self.assertIn("structures", got)
+
+    def test_json_includes_source_text_only_on_opt_in(self) -> None:
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl"), "--json",
+                          "--min-count", "1", "--include-source-text"])
+        self.assertEqual(rc, 0)
+        got = json.loads(buf.getvalue())
+        self.assertTrue(got["source_text_included"])
+        self.assertIn("phrases", got)
+        self.assertIn("openers", got)
+        self.assertTrue(any("let me" in f["phrase"] for f in got["phrases"]))
+
+    def test_text_report_withholds_source_text_by_default(self) -> None:
+        import io
+        import contextlib
+        for flag, expect_tables in (([], False), (["--include-source-text"],
+                                                  True)):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                vt.main(["--glob", str(self.tmp / "*.jsonl"),
+                         "--min-count", "1"] + flag)
+            report = buf.getvalue()
+            self.assertEqual("PHRASES" in report, expect_tables, flag)
+            # A fragment only the phrase/opener tables can reproduce — the
+            # let_me structure DESCRIPTION legitimately says "let me check",
+            # so that string cannot serve as the probe.
+            self.assertEqual("verify the counts" in report, expect_tables,
+                             flag)
+            # The counts-only concentration line prints either way.
+            self.assertIn("distinct openers", report)
+
+    def test_model_filter_via_cli(self) -> None:
+        _session([
+            _rec("user", "hi"),
+            _rec("assistant", "opus words here", model="claude-opus-5"),
+            _rec("assistant", "fable words here", model="claude-fable-5"),
+        ], self.tmp, name="mixed.jsonl")
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "mixed.jsonl"), "--json",
+                          "--min-count", "1", "--model", "fable"])
+        self.assertEqual(rc, 0)
+        got = json.loads(buf.getvalue())
+        self.assertEqual(got["model"]["turns"], 1)
+        self.assertEqual(got["model_filter"], "fable")
+        self.assertEqual(got["stats"]["model_filtered"], 1)
+
+    def test_missing_transcripts_exit_nonzero(self) -> None:
+        import io
+        import contextlib
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = vt.main(["--glob", str(self.tmp / "none-*.jsonl")])
+        self.assertEqual(rc, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

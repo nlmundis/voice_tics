@@ -1,0 +1,130 @@
+# voice_tics configuration — copy to voice_tics.toml and edit.
+#
+# Everything here is optional. With no config file at all the tool reads your
+# Claude Code transcripts, ranks the model against your own turns, and lints
+# with the two default error tics. This file is for the parts that are facts
+# about YOU rather than about the model.
+#
+# Unknown keys are an error, not a shrug. A misspelled key that gets silently
+# ignored is a setting you believe is in force and is not.
+
+[corpus]
+# Where your session transcripts live. The default is the standard Claude Code
+# location and you almost certainly do not need to change it.
+transcripts = "~/.claude/projects/*/*.jsonl"
+
+
+[baseline]
+# WHICH BASELINE: your transcript turns (default) or your own writing.
+#
+# They fail in opposite directions and neither is "the real one".
+#
+#   Transcripts are matched on medium, topic and week — the same conversation,
+#   the same vocabulary, the same fortnight. That match is what lets a ratio
+#   mean anything. What they are NOT matched on is register: instructions
+#   typed to an agent are short and imperative, so the constructions you reach
+#   for in long-form prose barely occur and no threshold will surface them.
+#
+#   Samples are matched on register and author, which is what you want when
+#   the thing you are linting is a document. They give up the topic and time
+#   match, so shared subject vocabulary inflates both sides.
+#
+# Use samples when you lint documents. Use transcripts when you want to know
+# how the model writes to you specifically, right now.
+#
+# ONE WARNING, AND IT IS THE IMPORTANT ONE: a sample corpus is only a baseline
+# if YOU wrote it. Point this at documents an assistant drafted or edited and
+# the model's prose is on both sides of the ratio, every tic divides by itself,
+# and the report says "nothing here" — silently, in the direction that passes.
+# The tool counts how many constructions land near parity and warns, but the
+# warning is deliberately reluctant. Narrow the glob to prose you wrote unaided.
+#
+# samples = "~/writing/**/*.md"
+
+# YOUR signature phrases, checked by name.
+#
+# Empty by default, and the emptiness is the point: this is a claim about how
+# ONE PERSON writes, so a shipped default would present a stranger's habits as
+# yours. Discovery cannot fill this in either — it ranks you against the model,
+# so it surfaces your chat REGISTER rather than your writing HABITS.
+#
+# The set below is a worked example from an author with an academic register.
+# Note what it is FOR: these are the words a generic AI-slop detector would
+# flag as machine-written. Measuring them against the model is how you find out
+# that they are yours, and that a wordlist would have deleted your voice. On
+# the reference corpus that lexicon measured 0.6x — the author used those words
+# nearly twice as often as the model did.
+#
+# Keep the provenance split when you fill this in. Some entries will be things
+# you KNOW about your writing; others will be hypotheses. A ratio near 1.0 on a
+# hypothesis means the hypothesis was wrong, which is the entry doing its job.
+#
+# signatures = [
+#   # --- from a known writing-style profile ---
+#   { name = "however",            pattern = "\\bhowever\\b" },
+#   { name = "it should be noted", pattern = "\\bit should be noted\\b" },
+#   { name = "that being said",    pattern = "\\bthat being said\\b" },
+#   { name = "as can be seen",     pattern = "\\bas can be (?:seen|observed)\\b" },
+#   { name = "thus",               pattern = "\\bthus\\b" },
+#   { name = "therefore",          pattern = "\\btherefore\\b" },
+#   { name = "in order to",        pattern = "\\bin order to\\b" },
+#   { name = "additionally",       pattern = "\\badditionally\\b" },
+#   { name = "furthermore",        pattern = "\\bfurthermore\\b" },
+#   { name = "herein",             pattern = "\\bherein\\b" },
+#   { name = "aforementioned",     pattern = "\\baforementioned\\b" },
+#   { name = "it is concluded",    pattern = "\\bit is concluded\\b" },
+#   # --- untested hypotheses, on the same footing as any crowd list ---
+#   { name = "essentially",        pattern = "\\bessentially\\b" },
+#   { name = "basically",          pattern = "\\bbasically\\b" },
+#   { name = "obviously",          pattern = "\\bobviously\\b" },
+#   { name = "kind of / sort of",  pattern = "\\b(?:kind|sort) of\\b" },
+# ]
+
+
+[lint]
+# Which STRUCTURE_PATTERNS keys prose_lint acts on. Keys that do not exist
+# fail the whole run rather than the first file that reaches them: a rule that
+# quietly stopped being checked is worse than a crash, because the build goes
+# green.
+#
+# The defaults are these, and they are a measurement rather than a preference
+# (rates per 10k words, model over baseline, 45-day reference corpus):
+#
+#   method_defence      10.0x   defending the method instead of stating it
+#   not_x_but_y          7.7x   the explicit "it's not A, it's B" reveal
+#   appositive_negation  2.4x   "Y, not X" — shared but model-heavier, so warn
+#
+# Re-measure on your own corpus before trusting them. Run voice_tics.py, read
+# the STRUCTURES table, and promote what separates for YOU.
+#
+# error = ["method_defence", "not_x_but_y"]
+# warn  = ["appositive_negation"]
+
+[lint.emdash]
+# A lone em dash outside a matched pair.
+#
+# OFF by default, on purpose. The em dash is the most-cited AI tell in public
+# advice and it did not survive measurement: on the reference corpus the model
+# and the author used it at the same rate, 1.0x. Gating on it would have
+# corrected the wrong writer, which is this repo's entire argument in one row.
+#
+# Measure yours before turning this on.
+enabled = false
+
+# Optional regex whose matches are blanked before dashes are counted, for a
+# citation or record format that uses a lone dash as a separator by
+# construction. Every span it matches is prose that stops being checked, so
+# write the narrowest pattern that works and anchor it to something structural.
+# A greedy pattern is how one quotation mark in trailing prose swallows a real
+# violation to end of line.
+#
+# exempt = 'EVIDENCE:[^"\n]*"[^"\n]*"'
+
+
+[output]
+# Domains left in cleartext when transcript fragments are printed. Empty means
+# every address is redacted, which is the default and the right one for anyone
+# who has not thought about it. An allowlist shipped with somebody else's
+# domains in it is a leak with a default value.
+#
+# keep_domains = ["your-company.com"]

@@ -1,0 +1,30 @@
+# A fully-populated config, every key set to a non-default value.
+#
+# This file exists to be PARSED, not copied: tests/test_repo.py loads it and
+# asserts every documented key round-trips, so the annotated
+# voice_tics.toml.example cannot drift away from what the parser accepts.
+# Start from voice_tics.toml.example instead, which explains what each key
+# costs you.
+
+[corpus]
+transcripts = "~/.claude/projects/*/*.jsonl"
+
+[baseline]
+samples = "~/writing/**/*.md"
+signatures = [
+  { name = "however",            pattern = "\\bhowever\\b" },
+  { name = "it should be noted", pattern = "\\bit should be noted\\b" },
+  { name = "thus",               pattern = "\\bthus\\b" },
+  { name = "herein",             pattern = "\\bherein\\b" },
+]
+
+[lint]
+error = ["method_defence", "not_x_but_y"]
+warn = ["appositive_negation"]
+
+[lint.emdash]
+enabled = true
+exempt = 'EVIDENCE:[^"\n]*"[^"\n]*"'
+
+[output]
+keep_domains = ["your-company.com"]

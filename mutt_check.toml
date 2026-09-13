@@ -1,0 +1,174 @@
+# The curated mutation gate for voice_tics.
+#
+# Every entry reverts ONE load-bearing decision and names why the decision
+# exists. `suites` names the test class that pins it, so this file doubles as
+# a map from each decision to its test. `make check` runs it after the unit
+# suite.
+#
+# A mutant goes in here only together with the test that kills it. A known
+# survivor would be a to-do dressed as evidence.
+#
+# Run: mutt_check           (needs https://github.com/nlmundis/mutt_check)
+
+[run]
+suites = ["tests.test_voice_tics", "tests.test_prose_lint",
+          "tests.test_emdash", "tests.test_samples", "tests.test_repo"]
+timeout = 300
+
+# --- the thing that makes this tool different ------------------------------
+
+[[mutant]]
+name = "signatures_ship_with_someone_elses_habits"
+why = "A default signature table presents one person's writing as everyone's. Empty is the claim."
+suites = ["tests.test_voice_tics.PatternTest"]
+file = "voice_tics.py"
+find = "BASELINE_SIGNATURES: Tuple[Tuple[str, str], ...] = ()"
+replace = 'BASELINE_SIGNATURES: Tuple[Tuple[str, str], ...] = (("however", r"\\bhowever\\b"),)'
+
+[[mutant]]
+name = "emdash_rule_ships_on"
+why = "One author's punctuation rule failing everyone's build is the exact error this repo argues against."
+suites = ["tests.test_prose_lint.Wiring"]
+file = "vt_config.py"
+find = "                 emdash_enabled: bool = False,"
+replace = "                 emdash_enabled: bool = True,"
+
+# --- the sample baseline ---------------------------------------------------
+
+[[mutant]]
+name = "sample_baseline_blends_with_user_turns"
+why = "Blending builds a corpus that is neither register, weighted by whichever side is larger."
+suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
+file = "voice_tics.py"
+find = "        if not is_model and samples:"
+replace = "        if not is_model and False:"
+
+[[mutant]]
+name = "empty_sample_glob_measures_against_nothing"
+why = "A silent empty baseline makes every ratio infinite and the report meaningless."
+suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
+file = "voice_tics.py"
+find = '''        if not stats.get("sample_paragraphs"):'''
+replace = '''        if False:'''
+
+[[mutant]]
+name = "unreadable_sample_kills_the_run"
+why = "One bad file in a corpus of hundreds must not cost the measurement."
+suites = ["tests.test_samples.ReadSamplesTest"]
+file = "voice_tics.py"
+find = "        except (OSError, UnicodeDecodeError):"
+replace = "        except OSError:"
+
+[[mutant]]
+name = "front_matter_counted_as_prose"
+why = "YAML keys would rank as phrases and pollute every n-gram table."
+suites = ["tests.test_samples.ReadSamplesTest"]
+file = "voice_tics.py"
+find = '        if raw.startswith("---\n"):'
+replace = "        if False:"
+
+# --- the contamination guard ----------------------------------------------
+
+[[mutant]]
+name = "contamination_guard_counts_one_sided_structures"
+why = "A zero on either side is the floor correction talking, not agreement between authors."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "        if m_count and t_count:"
+replace = "        if m_count or t_count:"
+
+[[mutant]]
+name = "contamination_guard_fires_on_thin_data"
+why = "Four comparable structures cannot support the claim; firing there is noise that trains people to ignore it."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "    if len(ratios) < 5:"
+replace = "    if len(ratios) < 0:"
+
+[[mutant]]
+name = "contamination_band_is_asymmetric"
+why = "0.8 and 1.25 are the same distance from parity inverted; an arithmetic band favours one direction."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "INDISTINGUISHABLE = (0.8, 1.25)"
+replace = "INDISTINGUISHABLE = (0.8, 1.2)"
+
+# --- config: silence is the failure mode -----------------------------------
+
+[[mutant]]
+name = "unknown_config_key_ignored"
+why = "A misspelled key silently ignored is a setting the user believes is in force and is not."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "            raise ConfigError(f\"unknown key {key!r} in {where}{hint}\")"
+replace = "            pass"
+
+[[mutant]]
+name = "duplicate_signature_names_silently_collapse"
+why = "Counts are keyed by name, so the later entry would replace the earlier one with no sign."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "        if name in seen:"
+replace = "        if False:"
+
+[[mutant]]
+name = "named_config_file_missing_is_not_an_error"
+why = "A --config the user typed and the tool ignored is worse than a crash."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "        if named:"
+replace = "        if False:"
+
+# --- the linter's loud-failure contract ------------------------------------
+
+[[mutant]]
+name = "retired_tic_key_lints_silently"
+why = "A rule that quietly stopped being checked is worse than a crash: the build goes green."
+suites = ["tests.test_prose_lint.Wiring"]
+file = "prose_lint.py"
+find = "    raise KeyError("
+replace = "    return re.compile(r'(?!x)x'), ''  # noqa\n    raise KeyError("
+
+# --- redaction fails toward over-redacting ---------------------------------
+
+[[mutant]]
+name = "allowlist_matched_as_a_substring"
+why = "A substring test fails open three ways, each leaving a real external address in cleartext."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = "    domain = email.lower().strip().rpartition(\"@\")[2]"
+replace = "    domain = email.lower().strip()"
+
+[[mutant]]
+name = "redaction_allowlist_defaults_to_open"
+why = "An allowlist shipped with somebody's domains in it is a leak with a default value."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = "def redact(text: str, keep_domains: Sequence[str] = ()) -> str:"
+replace = "def redact(text: str, keep_domains: Sequence[str] = (\"com\",)) -> str:"
+
+# --- the em-dash exemption is the hole, so it stays narrow -----------------
+
+[[mutant]]
+name = "bad_exempt_pattern_raises_instead_of_disarming"
+why = "An escaping exception reaches a caller's top-level handler, exits 0, and disarms the whole check."
+suites = ["tests.test_emdash.EvidenceCitationExemptionTest"]
+file = "emdash.py"
+find = "    except re.error:\n        return []"
+replace = "    except ZeroDivisionError:\n        return []"
+
+[[mutant]]
+name = "exempt_pattern_dropped_on_the_way_through"
+why = "lone_dash_blocks must pass the pattern down; dropping it silently disables every caller's exemption."
+suites = ["tests.test_emdash.EvidenceCitationExemptionTest"]
+file = "emdash.py"
+find = "in lone_dash_lines(text, exempt)]"
+replace = "in lone_dash_lines(text)]"
+
+[[mutant]]
+name = "label_exception_applied_to_prose"
+why = "Applying the table-cell label exception to prose inverts the check; it produced 1,334 bogus findings once."
+suites = ["tests.test_emdash.LoneDashTest"]
+file = "emdash.py"
+find = "        if is_cell:"
+replace = "        if True:"

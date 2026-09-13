@@ -1,0 +1,260 @@
+"""Everything about this installation that is not about the method.
+
+WHAT BELONGS IN CONFIG AND WHAT BELONGS IN CODE
+    The line is whose fact it is.
+
+    The structure detectors in ``voice_tics.STRUCTURE_PATTERNS`` are the
+    tool's substance — claims about how the model writes, each with its
+    measured ratio recorded beside it — so they live in code, in version
+    control, where a change to one is a change somebody can review.
+
+    Your signature phrases, your transcript location, the domains you do not
+    need redacted, and which detectors are allowed to fail your build are
+    facts about YOU. They live here. The private original this was extracted
+    from had all four hardcoded, which is exactly why it could not be
+    published without this file existing first.
+
+IT RUNS WITH NO CONFIG AT ALL
+    Every field has a default and ``voice_tics.toml`` is optional. The
+    defaults are the conservative reading: the standard Claude Code transcript
+    location, no signature phrases, no allowlisted domains, and the em-dash
+    rule off. A tool that demands a config file before it will say anything is
+    a tool nobody evaluates.
+
+UNKNOWN KEYS ARE AN ERROR
+    A misspelled key that is silently ignored is a setting the user believes
+    is in force and is not. For a linter that can fail a build, and for a
+    redaction allowlist, that failure is silent in the direction that hurts.
+    Every table is checked against its known keys and an unrecognised one
+    raises ``ConfigError`` naming the nearest match.
+"""
+
+from __future__ import annotations
+
+import difflib
+import os
+import re
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 and earlier
+    import tomli as tomllib  # type: ignore[no-redef]
+
+CONFIG_NAME = "voice_tics.toml"
+
+# The standard Claude Code transcript location. Every session writes a .jsonl
+# here holding both sides of the conversation, which is what makes a matched
+# baseline possible without asking anyone to collect anything.
+DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
+
+# Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
+# two are the defaults because they are the ones whose measured separation was
+# large enough to act on (6.6x and 7.7x model-over-baseline on the reference
+# corpus; see docs/measurement.md). They are still only a default: the whole
+# argument of this tool is that you should measure your own.
+DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
+
+# Model-heavier but genuinely shared, so an occurrence is a prompt to look
+# rather than proof of a draft. Warnings never fail a run without --strict.
+DEFAULT_WARN_TICS: Tuple[str, ...] = ("appositive_negation",)
+
+TOP_KEYS = frozenset({"corpus", "baseline", "lint", "output"})
+CORPUS_KEYS = frozenset({"transcripts"})
+BASELINE_KEYS = frozenset({"signatures", "samples"})
+LINT_KEYS = frozenset({"error", "warn", "emdash"})
+EMDASH_KEYS = frozenset({"enabled", "exempt"})
+OUTPUT_KEYS = frozenset({"keep_domains"})
+SIGNATURE_KEYS = frozenset({"name", "pattern"})
+
+
+class ConfigError(Exception):
+    """A config file that cannot be trusted to mean what it says.
+
+    Raised for unreadable files, malformed TOML, unknown keys, wrong types and
+    uncompilable patterns. Never raised for a MISSING file, which is the
+    supported zero-config case and yields ``Config.default()`` instead.
+    """
+
+
+def _reject_unknown(raw: Mapping[str, Any], known: frozenset, where: str) -> None:
+    """Raise on the first key ``where`` does not define, suggesting a fix."""
+    for key in raw:
+        if key not in known:
+            near = difflib.get_close_matches(key, sorted(known), n=1)
+            hint = f"; did you mean {near[0]!r}?" if near else ""
+            raise ConfigError(f"unknown key {key!r} in {where}{hint}")
+
+
+def _as_str_list(value: Any, where: str) -> List[str]:
+    """A TOML array of strings, or a ConfigError naming what arrived instead."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ConfigError(f"{where} must be an array of strings")
+    return list(value)
+
+
+def _parse_signatures(value: Any) -> Tuple[Tuple[str, str], ...]:
+    """Validate ``[baseline] signatures`` into (name, pattern) pairs.
+
+    Each entry is a table with ``name`` and ``pattern``. The pattern is
+    compiled here rather than at first use so a typo fails at startup, next to
+    the line that caused it, instead of halfway through a scan.
+    """
+    if not isinstance(value, list):
+        raise ConfigError("[baseline] signatures must be an array of tables")
+    out: List[Tuple[str, str]] = []
+    seen: Dict[str, int] = {}
+    for i, entry in enumerate(value):
+        where = f"[baseline] signatures entry {i + 1}"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{where} must be a table with name and pattern")
+        _reject_unknown(entry, SIGNATURE_KEYS, where)
+        name, pattern = entry.get("name"), entry.get("pattern")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"{where} needs a non-empty string name")
+        if not isinstance(pattern, str) or not pattern:
+            raise ConfigError(f"{where} ({name}) needs a non-empty string pattern")
+        if name in seen:
+            raise ConfigError(
+                f"{where} reuses the name {name!r} from entry {seen[name]}; "
+                "counts are keyed by name, so the later entry would silently "
+                "replace the earlier one")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ConfigError(f"{where} ({name}) has an invalid pattern: {exc}") from None
+        seen[name] = i + 1
+        out.append((name, pattern))
+    return tuple(out)
+
+
+class Config:
+    """One installation's answers, with a default for every field.
+
+    Attributes:
+        transcripts: Glob for the session files to read, ``~`` expanded.
+        signatures: The baseline author's own phrases, checked by name. Empty
+            by default; see ``voice_tics.toml.example`` for why you would fill
+            it in and why discovery cannot find these for you.
+        samples: Optional glob of your own writing to use as the baseline
+            instead of your transcript turns. Empty means use the transcripts.
+            See ``voice_tics.read_samples`` for what each baseline costs.
+        error_tics: Structure keys that fail a lint run.
+        warn_tics: Structure keys that warn, and fail only under ``--strict``.
+        emdash_enabled: Whether a lone em dash is an error. Off by default:
+            it is one author's punctuation rule, not a measured model tic.
+        emdash_exempt: Optional regex whose matches are blanked before em
+            dashes are counted, for a citation format that uses a lone dash
+            as a separator by construction.
+        keep_domains: Domains left in cleartext by ``redact``.
+    """
+
+    def __init__(self,
+                 transcripts: str = DEFAULT_TRANSCRIPTS,
+                 samples: str = "",
+                 signatures: Sequence[Tuple[str, str]] = (),
+                 error_tics: Sequence[str] = DEFAULT_ERROR_TICS,
+                 warn_tics: Sequence[str] = DEFAULT_WARN_TICS,
+                 emdash_enabled: bool = False,
+                 emdash_exempt: str = "",
+                 keep_domains: Sequence[str] = ()) -> None:
+        self.transcripts = os.path.expanduser(transcripts)
+        self.samples = os.path.expanduser(samples) if samples else ""
+        self.signatures = tuple(signatures)
+        self.error_tics = tuple(error_tics)
+        self.warn_tics = tuple(warn_tics)
+        self.emdash_enabled = emdash_enabled
+        self.emdash_exempt = emdash_exempt
+        self.keep_domains = tuple(keep_domains)
+
+    @classmethod
+    def default(cls) -> "Config":
+        """The zero-config installation: standard paths, no personal facts."""
+        return cls()
+
+    @classmethod
+    def parse(cls, raw: Mapping[str, Any]) -> "Config":
+        """Build a Config from decoded TOML; every problem is a ConfigError."""
+        _reject_unknown(raw, TOP_KEYS, "the config file")
+        corpus = raw.get("corpus", {})
+        baseline = raw.get("baseline", {})
+        lint = raw.get("lint", {})
+        output = raw.get("output", {})
+        for table, keys, name in ((corpus, CORPUS_KEYS, "[corpus]"),
+                                  (baseline, BASELINE_KEYS, "[baseline]"),
+                                  (lint, LINT_KEYS, "[lint]"),
+                                  (output, OUTPUT_KEYS, "[output]")):
+            if not isinstance(table, dict):
+                raise ConfigError(f"{name} must be a table")
+            _reject_unknown(table, keys, name)
+
+        emdash = lint.get("emdash", {})
+        if not isinstance(emdash, dict):
+            raise ConfigError("[lint.emdash] must be a table")
+        _reject_unknown(emdash, EMDASH_KEYS, "[lint.emdash]")
+        enabled = emdash.get("enabled", False)
+        if not isinstance(enabled, bool):
+            raise ConfigError("[lint.emdash] enabled must be true or false")
+        exempt = emdash.get("exempt", "")
+        if not isinstance(exempt, str):
+            raise ConfigError("[lint.emdash] exempt must be a string")
+        if exempt:
+            try:
+                re.compile(exempt)
+            except re.error as exc:
+                raise ConfigError(f"[lint.emdash] exempt is not a valid regex: {exc}") from None
+
+        transcripts = corpus.get("transcripts", DEFAULT_TRANSCRIPTS)
+        if not isinstance(transcripts, str) or not transcripts:
+            raise ConfigError("[corpus] transcripts must be a non-empty string")
+
+        samples = baseline.get("samples", "")
+        if not isinstance(samples, str):
+            raise ConfigError("[baseline] samples must be a string glob")
+
+        return cls(
+            transcripts=transcripts,
+            samples=samples,
+            signatures=_parse_signatures(baseline["signatures"])
+            if "signatures" in baseline else (),
+            error_tics=_as_str_list(lint["error"], "[lint] error")
+            if "error" in lint else DEFAULT_ERROR_TICS,
+            warn_tics=_as_str_list(lint["warn"], "[lint] warn")
+            if "warn" in lint else DEFAULT_WARN_TICS,
+            emdash_enabled=enabled,
+            emdash_exempt=exempt,
+            keep_domains=_as_str_list(output["keep_domains"], "[output] keep_domains")
+            if "keep_domains" in output else (),
+        )
+
+
+def load(path: str = "") -> Config:
+    """The config at ``path``, or the nearest ``voice_tics.toml``, or defaults.
+
+    Args:
+        path: An explicit config file. Missing it is an error, because a
+            ``--config`` the user typed and this tool ignored is worse than a
+            crash.
+
+    Returns:
+        A ``Config``. With no ``path`` and no ``voice_tics.toml`` in the
+        working directory, the defaults: the tool runs out of the box.
+
+    Raises:
+        ConfigError: The file is unreadable, is not valid TOML, or says
+            something this version does not understand.
+    """
+    named = bool(path)
+    target = path or CONFIG_NAME
+    try:
+        with open(target, "rb") as fh:
+            raw = tomllib.load(fh)
+    except FileNotFoundError:
+        if named:
+            raise ConfigError(f"no config file at {target}") from None
+        return Config.default()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"cannot read {target}: {exc}") from None
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{target}: {exc}") from None
+    return Config.parse(raw)
