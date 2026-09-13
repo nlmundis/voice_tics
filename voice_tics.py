@@ -627,9 +627,9 @@ def read_samples(pattern: str,
         them. Measured on the reference author's transcripts over a 14-day
         window on 2026-09-12: 8.9 words per sentence on the chat side against
         12.2 on the model's, from only 249 baseline words, so read it as the
-        direction of the gap rather than its size. (The 13.89 / 13.85 figures
-        elsewhere in this repo are a different measurement: a 45-day window
-        on 2026-08-13, after harness-composed records were removed.)
+        direction of the gap rather than its size. (The sentence-length
+        figures in the README are a different measurement: a 45-day window,
+        13.89 / 13.85 on 2026-08-13 and 13.61 / 12.34 on 2026-09-13.)
 
         Samples are matched on register and on author, which is what you
         actually want when the thing being linted is a document. What they
@@ -1010,7 +1010,8 @@ STRUCTURE_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
     # is not automatically true of this model: the lexicon below scores 0.6x
     # on the cleaned reference corpus (model 1.47 vs baseline 2.38 per 10k,
     # 2026-08-13), meaning the baseline author used these words 1.6 times as
-    # often as the model did.
+    # often as the model did, and 0.99x when re-measured on 2026-09-13
+    # (0.51 vs 0.52 per 10k, from 45 and 5 uses).
     # (The 0.3x this comment first carried was measured against the isMeta-
     # contaminated corpus.) A rule adopted from the list unmeasured would have
     # "corrected" the wrong writer.

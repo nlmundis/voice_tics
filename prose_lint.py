@@ -7,16 +7,18 @@ on a matched corpus. Nothing is here because it sounds robotic.
 WHAT IS DELIBERATELY ABSENT, AND WHY
     * **Any sentence-length or readability threshold.** The measurement that
       motivated this tool found mean sentence length does not separate the two
-      writers at all: 13.89 words for the model against 13.85 for the author
-      (45-day corpus). A length gate therefore lints an ACADEMIC REGISTER —
+      writers: 13.89 words for the model against 13.85 for the author (45-day
+      corpus, 2026-08-13), and 13.61 against 12.34 a month later, both well
+      under the 16-word gate the predecessor used. A length gate therefore lints an ACADEMIC REGISTER —
       long compound-complex sentences, passive voice, "However" — and deletes
       it. The tool that did exactly that to the reference author drew this
       summary from him: "we essentially made me sound simpler so I don't sound
       like AI." Sentence length is REPORTED here and can never fail a run.
 
-    * **The slop lexicon** ("delve", "crucial", …): measured at 0.6x, meaning
-      the AUTHOR used those words more often than the model did. A lexicon
-      rule would correct the wrong writer.
+    * **The slop lexicon** ("delve", "crucial", …): measured at 0.6x on
+      2026-08-13 and 0.99x on 2026-09-13, meaning the author uses those words
+      at least as often as the model does. A lexicon rule would correct the
+      wrong writer.
 
     * **The chat-register family** ("let me check", "want me to"): the largest
       measured tics by far, and useless here, because none of them can appear
@@ -25,21 +27,24 @@ WHAT IS DELIBERATELY ABSENT, AND WHY
 
 WHAT FAILS A RUN INSTEAD
     Structures, at the model's measured ratios (per 10k words, model over
-    baseline, 45-day matched corpus). Which keys are in force is config;
-    these are the shipped defaults:
+    baseline, 45-day matched corpus, 2026-09-13; see TIC_PROVENANCE for the
+    earlier figures). Which keys are in force is config; these are the
+    shipped defaults:
 
-    * ``method_defence`` — 10.0x. Defending the method instead of stating the
+    * ``method_defence`` — 3.8x. Defending the method instead of stating the
       finding. It reaches documents through model drafts rather than through
       the author's own writing, so flagging it corrects the right author.
-    * ``not_x_but_y`` — 7.7x. The explicit "it's not A, it's B" reveal.
-    * ``appositive_negation`` — 2.4x, a WARNING rather than an error: it is
+    * ``not_x_but_y`` — 12.4x. The explicit "it's not A, it's B" reveal.
+    * ``appositive_negation`` — 1.7x, a WARNING rather than an error: it is
       model-heavier but genuinely shared, so an occurrence is a prompt to
       look, not proof of a draft. ``--strict`` promotes warnings to failures.
 
     A lone em dash is available as a rule and ships OFF. It is one author's
-    punctuation preference, and on the reference corpus the em-dash rates were
-    identical (1.0x) — the most-cited AI tell in public advice, and it did not
-    survive measurement. Turn it on only if your own ratio says something.
+    punctuation preference. On the reference corpus the em-dash rates were
+    identical (1.0x) on 2026-08-13 and 1.75x apart a month later, no more
+    separation than the warning-tier ``appositive_negation``, while the author
+    still wrote it hundreds of times. Turn it on only if your own ratio says
+    something.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     Those ratios come from one author and one corpus. Run ``voice_tics.py``
@@ -78,7 +83,8 @@ import emdash
 import voice_tics
 
 # Why each DEFAULT tier key is in the tier it is in, as a rate ratio of
-# model-over-baseline on the reference corpus (45 days, 2026-08-13). Kept
+# model-over-baseline on the reference corpus (45 days, re-measured 2026-09-13
+# with this repo's code; the 2026-08-13 figures are kept beside them). Kept
 # beside the keys so a future re-tiering starts from the number that put them
 # there rather than from taste, and so anyone can see the defaults are a
 # measurement someone took and not a preference someone had.
@@ -88,11 +94,14 @@ import voice_tics
 # documentation, not membership; ``tests/test_prose_lint.py`` pins that every
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
-    "method_defence": "10.0x model/baseline, 2026-08-13",
-    "not_x_but_y": "7.7x model/baseline, 2026-08-13",
+    "method_defence":
+        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); 10.0x on 2026-08-13",
+    "not_x_but_y":
+        "12.4x model/baseline, 2026-09-13 (113 / 1 uses, so unstable); "
+        "7.7x on 2026-08-13",
     "appositive_negation":
-        "2.4x model/baseline, 2026-08-13 — shared, model-heavier, so a "
-        "warning rather than an error",
+        "1.7x model/baseline, 2026-09-13 (2,462 / 157 uses); 2.4x on "
+        "2026-08-13 — shared, model-heavier, so a warning rather than an error",
 }
 
 EXCERPT_CAP = 60
@@ -356,8 +365,8 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
 
 INFO_NOTE = (
     "reported, never a failure: mean sentence length does not separate "
-    "model from author (13.89 vs 13.85, 2026-08-13), so a threshold here "
-    "would lint the author's register, not the machine's"
+    "model from author (13.61 vs 12.34 words, 2026-09-13), so a threshold "
+    "here would lint the author's register, not the machine's"
 )
 
 

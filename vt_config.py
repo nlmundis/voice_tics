@@ -79,7 +79,7 @@ DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 # ``prose_lint.TIC_PROVENANCE``, and are deliberately not repeated here: a
 # second copy of a measurement is how one of them goes stale (this comment
 # once carried 6.6x for method_defence, the figure for the detector before it
-# was sharpened, beside a 10.0x everywhere else). They are still only a
+# was sharpened, when every other copy had moved on). They are still only a
 # default: the whole argument of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 

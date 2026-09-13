@@ -8,9 +8,11 @@ That is why ``[lint.emdash] enabled`` is false by default.
 WHY IT SHIPS ANYWAY
     The em dash is the single most-cited "AI tell" in public advice, which
     makes it the best illustration of this repo's argument. On the reference
-    corpus the model's em-dash rate and the baseline author's were 1.0x apart:
-    identical. A wordlist tool would have gated on it and corrected the wrong
-    writer; the matched baseline said do not.
+    corpus the model's em-dash rate and the baseline author's were 1.0x apart
+    on 2026-08-13, and 1.75x a month later: no more separation than the
+    warning-tier ``appositive_negation``, while the author still wrote it 922
+    times in that window. A wordlist tool gates on it and corrects the wrong
+    writer; the matched baseline says it is at most a prompt to look.
 
     So the useful thing this module does for most people is not failing their
     build. It is putting a number on the tell before they act on it. Run

@@ -48,22 +48,42 @@ it does not decide what a tic is, and it cannot.
 
 ### What the method found
 
-Results from one author's 45-day transcript corpus, measured 2026-08-13 with
-the transcript baseline, all of which a wordlist would have got backwards:
+One author, measured twice a month apart, both times over a 45-day window of
+Claude Code transcripts against the author's own turns, with every model in the
+window blended. The first column is the private original this repo was
+extracted from; the second is this repo's code, on 563 transcripts holding
+885,083 words of model prose and 96,897 of the author's. Ratios are model rate
+over author rate; the counts are uses in the second window, model / author.
 
-| Measured | Result | What a wordlist does |
-|---|---|---|
-| Mean sentence length | 13.89 model vs **13.85** author | Fails builds over 16 |
-| Em dash | **1.0x**, identical rates | Treats it as the signature tell |
-| The slop lexicon (*delve*, *crucial*, …) | **0.6x**: the *author* used them more | Flags them as machine-written |
-| `not_x_but_y` ("it's not A, it's B") | **7.7x** | Not on any list |
-| `method_defence` (defending the method instead of stating the finding) | **10.0x** | Not on any list |
+| Measured | 2026-08-13 | 2026-09-13 | What a wordlist does |
+|---|---|---|---|
+| Mean sentence length | 13.89 model vs 13.85 author | **13.61** model vs **12.34** author | Fails builds over 16 |
+| Em dash | 1.0x | **1.75x** (14,747 / 922) | Treats it as the signature tell |
+| The slop lexicon (*delve*, *crucial*, …) | 0.6x | **0.99x** (45 / 5) | Flags them as machine-written |
+| `not_x_but_y` ("it's not A, it's B") | 7.7x | **12.4x** (113 / 1) | Not on any list |
+| `method_defence` (defending the method instead of stating the finding) | 10.0x | **3.8x** (345 / 10) | Not on any list |
 
-The two that separated are not in any public list. The three everyone gates on
-did not separate at all. That asymmetry is the whole point.
+On both dates the two structures in this table that separated most are on no
+public list,
+and the folk tells separated weakly or not at all. The slop lexicon sits at
+parity: the author uses it as often as the model does. Mean sentence length
+differs by about a tenth, with both sides well under the 16-word gate the
+predecessor linter used.
 
-Sentence length is therefore **reported and can never fail a run** in
-`prose_lint`. The em-dash rule ships **off**.
+The em dash moved. Identical in August, it was 1.75x in September: the same
+separation as `appositive_negation` (1.7x), which ships only as a warning. And the
+author still wrote it 922 times in the window, so a gate on it fails the
+author's own prose constantly.
+
+The month moved every row, on the same author and the same method.
+`method_defence` fell from 10.0x to 3.8x. The rows resting on a handful of
+the author's uses are the least stable: `not_x_but_y` stands on a single one
+in September, so one more would halve it. That is the best argument this
+repo has for measuring your own corpus instead of trusting anyone's table,
+this one included.
+
+Sentence length is **reported and can never fail a run** in `prose_lint`. The
+em-dash rule ships **off**.
 
 ## Two baselines, and what each one costs
 
@@ -205,7 +225,7 @@ your transcripts.**
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged
   sentence, a false one costs trust in every other row. Widening it would also
-  invalidate the 7.7x measurement recorded beside it.
+  invalidate the measurements recorded beside it.
 - The `rule_of_three_no_oxford` detector is low precision and is labelled as
   such in the output. It mostly catches clause coordination.
 - `prose_lint` misses a table row that opens with an HTML tag and ends with a
