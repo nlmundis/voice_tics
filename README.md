@@ -48,8 +48,8 @@ it does not decide what a tic is, and it cannot.
 
 ### What the method found
 
-Three results from a 45-day reference corpus, all of which a wordlist would
-have got backwards:
+Results from one author's 45-day transcript corpus, measured 2026-08-13 with
+the transcript baseline, all of which a wordlist would have got backwards:
 
 | Measured | Result | What a wordlist does |
 |---|---|---|
@@ -111,7 +111,10 @@ cd voice_tics
 python3 voice_tics.py --days 30
 ```
 
-On Python 3.10 and earlier, `pip install tomli` if you want a config file.
+The one exception is reading a config file on Python 3.10 or earlier, where
+the standard library has no TOML parser: `pip install tomli`. Without a config
+file nothing is imported beyond the standard library, on any supported
+version.
 
 ## Configure
 
@@ -135,10 +138,10 @@ ignored is a setting you believe is in force and is not.
 ## Linting
 
 ```bash
-prose_lint draft.md                 # exit 1 on any error
-prose_lint --strict draft.md        # warnings fail too
-cat draft.md | prose_lint -
-prose_lint --json draft.md
+python3 prose_lint.py draft.md              # exit 1 on any error
+python3 prose_lint.py --strict draft.md     # warnings fail too
+cat draft.md | python3 prose_lint.py -
+python3 prose_lint.py --json draft.md
 ```
 
 Exit codes: `0` clean or warnings only, `1` any error (or any warning under
@@ -198,6 +201,11 @@ your transcripts.**
   invalidate the 7.7x measurement recorded beside it.
 - The `rule_of_three_no_oxford` detector is low precision and is labelled as
   such in the output. It mostly catches clause coordination.
+- `prose_lint` misses a table row that opens with an HTML tag and ends with a
+  pipe (`<b>| … |`): the tag hides the row from the table pass, and the body
+  pass blanks it once the tag is stripped. Telling it apart needs markup
+  context the line-based walk does not model. The miss is toward
+  undercounting.
 - Chat-register tics (`let_me`, `i_should_note`) are measured but are useless
   for linting documents, because they cannot appear in one. `prose_lint` does
   not carry them: a linter that did would report clean runs as a property of
@@ -206,12 +214,21 @@ your transcripts.**
 ## Development
 
 ```bash
-make check
+make test       # the unit suite; standard library only
+make check      # the unit suite, then the mutation gate
 ```
 
-Runs the unit suite, then `mutt_check` against it: a curated mutation gate
-that reverts each design decision the code rests on and requires the tests
-to go red. See [mutt_check](https://github.com/nlmundis/mutt_check).
+`make check` also runs [mutt_check](https://github.com/nlmundis/mutt_check),
+a curated mutation gate that reverts each design decision the code rests on
+and requires the tests to go red. It is a separate tool, so install it first:
+
+```bash
+pip install "mutt_check @ git+https://github.com/nlmundis/mutt_check@v0.0.2"
+```
+
+Without it, `make check` stops with that instruction rather than skipping the
+gate: a check that quietly did not run is a green build nobody earned. To use
+a checkout instead of an install, `make check MUTT_CHECK="python3 path/to/mutt_check.py"`.
 
 ## License
 

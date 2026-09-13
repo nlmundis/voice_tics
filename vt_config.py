@@ -36,12 +36,36 @@ import os
 import re
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10 and earlier
-    import tomli as tomllib  # type: ignore[no-redef]
-
 CONFIG_NAME = "voice_tics.toml"
+
+
+def _toml_module() -> Any:
+    """The TOML parser module, imported only when a config file exists.
+
+    WHY THE IMPORT IS NOT AT MODULE SCOPE
+        ``tomllib`` arrived in Python 3.11. At module scope, a missing parser
+        on 3.9 or 3.10 killed both entry points before argparse ran, config
+        file or not, which made the README's "stdlib only, Python 3.9+" false
+        for the zero-config case the tool is built around. Importing here
+        means only a run that actually has a config file needs a parser, and
+        that run gets a ConfigError saying what to install instead of a
+        traceback.
+
+    Raises:
+        ConfigError: Neither ``tomllib`` nor ``tomli`` can be imported.
+    """
+    try:
+        import tomllib
+        return tomllib
+    except ImportError:  # Python 3.10 and earlier
+        pass
+    try:
+        import tomli
+        return tomli
+    except ImportError:
+        raise ConfigError(
+            "reading a config file on Python 3.10 or earlier needs tomli: "
+            "pip install tomli") from None
 
 # The standard Claude Code transcript location. Every session writes a .jsonl
 # here holding both sides of the conversation, which is what makes a matched
@@ -50,9 +74,12 @@ DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 
 # Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
 # two are the defaults because they are the ones whose measured separation was
-# large enough to act on (6.6x and 7.7x model-over-baseline on the reference
-# corpus; see docs/measurement.md). They are still only a default: the whole
-# argument of this tool is that you should measure your own.
+# large enough to act on. The ratios themselves live in ONE place,
+# ``prose_lint.TIC_PROVENANCE``, and are deliberately not repeated here: a
+# second copy of a measurement is how one of them goes stale (this comment
+# once carried 6.6x for method_defence, the figure for the detector before it
+# was sharpened, beside a 10.0x everywhere else). They are still only a
+# default: the whole argument of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 
 # Model-heavier but genuinely shared, so an occurrence is a prompt to look
@@ -303,13 +330,18 @@ def load(path: str = "") -> Config:
     target = path or CONFIG_NAME
     try:
         with open(target, "rb") as fh:
-            raw = tomllib.load(fh)
+            data = fh.read()
     except FileNotFoundError:
         if named:
             raise ConfigError(f"no config file at {target}") from None
         return Config.default()
-    except (OSError, UnicodeDecodeError) as exc:
+    except OSError as exc:
         raise ConfigError(f"cannot read {target}: {exc}") from None
-    except tomllib.TOMLDecodeError as exc:
+    toml = _toml_module()
+    try:
+        raw = toml.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"cannot read {target}: {exc}") from None
+    except toml.TOMLDecodeError as exc:
         raise ConfigError(f"{target}: {exc}") from None
     return Config.parse(raw)

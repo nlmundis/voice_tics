@@ -7,9 +7,12 @@ they are pinned here.
 
 from __future__ import annotations
 
+import ast
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +21,7 @@ sys.path.insert(0, REPO)
 import prose_lint  # noqa: E402
 import vt_config as config_mod  # noqa: E402
 import vt_redact  # noqa: E402
+from tests import support  # noqa: E402
 
 
 def _read(path: str) -> str:
@@ -224,6 +228,149 @@ class DocsTest(unittest.TestCase):
                     self.assertIn(ratio.group(1), readme,
                                   f"{key} is {ratio.group(1)} in code; the "
                                   "README says otherwise")
+
+
+class StdlibOnlyTest(unittest.TestCase):
+    """"Stdlib only, Python 3.9+" must be true with no TOML parser installed.
+
+    On 3.9 and 3.10 there is no ``tomllib``. A module-scope import made both
+    entry points die before argparse, config file or not.
+    """
+
+    BLOCK = ("import sys; sys.modules['tomllib'] = None; "
+             "sys.modules['tomli'] = None; sys.path.insert(0, %r); " % REPO)
+
+    def _python(self, code: str) -> "subprocess.CompletedProcess[str]":
+        with tempfile.TemporaryDirectory() as cwd:
+            return subprocess.run([sys.executable, "-c", self.BLOCK + code],
+                                  capture_output=True, text=True, cwd=cwd)
+
+    def test_both_entry_points_import_without_a_toml_parser(self) -> None:
+        run = self._python("import voice_tics, prose_lint; "
+                           "print(prose_lint.lint_text('It is fine.')[0])")
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_no_config_file_means_no_parser_is_needed(self) -> None:
+        run = self._python("import vt_config; "
+                           "print(vt_config.load().error_tics)")
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_a_config_file_without_a_parser_names_what_to_install(self) -> None:
+        path = os.path.join(REPO, "voice_tics.toml.example")
+        run = self._python(
+            "import vt_config\n"
+            "try:\n"
+            "    vt_config.load(%r)\n"
+            "except vt_config.ConfigError as exc:\n"
+            "    print(exc)\n" % path)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("pip install tomli", run.stdout)
+
+    def test_the_readme_says_when_tomli_is_needed(self) -> None:
+        readme = _read(os.path.join(REPO, "README.md"))
+        self.assertIn("Stdlib only, Python 3.9+", readme)
+        self.assertIn("pip install tomli", readme)
+
+
+class VersionSupportTest(unittest.TestCase):
+    """The README's version floor and the CI matrix are one claim."""
+
+    def test_ci_runs_every_version_from_the_readme_floor_up(self) -> None:
+        readme = _read(os.path.join(REPO, "README.md"))
+        floor = re.search(r"Python 3\.(\d+)\+", readme)
+        self.assertIsNotNone(floor, "the README states no version floor")
+        workflow = _read(os.path.join(REPO, ".github", "workflows",
+                                      "check.yml"))
+        matrix = re.search(r"python: \[(.+?)\]", workflow)
+        self.assertIsNotNone(matrix, "the workflow has no python matrix")
+        minors = sorted(int(m) for m in re.findall(r"3\.(\d+)",
+                                                   matrix.group(1)))
+        self.assertEqual(minors[0], int(floor.group(1)))
+        self.assertEqual(minors, list(range(minors[0], minors[-1] + 1)),
+                         "the matrix skips a version between floor and top")
+
+    def test_ci_runs_the_whole_gate(self) -> None:
+        workflow = _read(os.path.join(REPO, ".github", "workflows",
+                                      "check.yml"))
+        self.assertIn("make check", workflow)
+
+    def test_ci_and_readme_pin_the_same_mutt_check(self) -> None:
+        pin = r"mutt_check@(v[\d.]+)"
+        readme = re.findall(pin, _read(os.path.join(REPO, "README.md")))
+        workflow = re.findall(pin, _read(os.path.join(
+            REPO, ".github", "workflows", "check.yml")))
+        makefile = re.findall(pin, _read(os.path.join(REPO, "Makefile")))
+        self.assertTrue(readme and workflow and makefile)
+        self.assertEqual(set(readme) | set(workflow) | set(makefile),
+                         {readme[0]})
+
+
+class GateTest(unittest.TestCase):
+    """`make check` must fail loudly, never skip, when the gate is absent."""
+
+    def test_a_missing_mutt_check_stops_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = subprocess.run(
+                ["make", "-s", "-C", REPO, "mutants",
+                 "MUTT_CHECK=" + os.path.join(tmp, "absent")],
+                capture_output=True, text=True)
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("pip install", run.stdout)
+
+
+class HermeticSuiteTest(unittest.TestCase):
+    """A developer's own voice_tics.toml must not reach the suite."""
+
+    def test_scratch_files_are_removed_when_the_module_ends(self) -> None:
+        support.enter_hermetic_cwd()
+        try:
+            path = support.scratch_file("x")
+            cwd = os.getcwd()
+            self.assertNotEqual(os.path.realpath(cwd), os.path.realpath(REPO))
+        finally:
+            support.leave_hermetic_cwd()
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(cwd))
+
+
+class ShippedCommandsTest(unittest.TestCase):
+    """Every command the README tells a reader to run must exist after a clone."""
+
+    STANDARD = frozenset({"python3", "make", "git", "cd", "cp", "cat", "pip"})
+
+    def test_every_readme_command_is_shipped_or_standard(self) -> None:
+        readme = _read(os.path.join(REPO, "README.md"))
+        for block in re.findall(r"```bash\n(.*?)```", readme, re.S):
+            for line in block.splitlines():
+                command = line.split("#", 1)[0].strip()
+                for stage in filter(None, (c.strip() for c in command.split("|"))):
+                    first = stage.split()[0]
+                    with self.subTest(command=stage):
+                        self.assertTrue(
+                            first in self.STANDARD
+                            or os.path.isfile(os.path.join(REPO, first)),
+                            f"README runs {first!r}, which is neither shipped "
+                            "nor a standard tool")
+
+    def test_the_scripts_are_executable_so_their_shebangs_work(self) -> None:
+        for script in ("voice_tics.py", "prose_lint.py"):
+            with self.subTest(script=script):
+                self.assertTrue(os.access(os.path.join(REPO, script), os.X_OK))
+
+    def test_every_repo_path_a_file_cites_exists(self) -> None:
+        """A comment citing a measurement doc that never shipped is how
+        a reader learns to distrust every other citation."""
+        cited = re.compile(r"\b(?:docs|examples|tests)/[\w./-]+")
+        for name in sorted(os.listdir(REPO)) + [
+                os.path.join("tests", n) for n in os.listdir(
+                    os.path.join(REPO, "tests"))]:
+            if not name.endswith((".py", ".md", ".toml", ".example")):
+                continue
+            for ref in set(cited.findall(_read(os.path.join(REPO, name)))):
+                ref = ref.rstrip(".")
+                with self.subTest(file=name, ref=ref):
+                    self.assertTrue(os.path.exists(os.path.join(REPO, ref)),
+                                    f"{name} cites {ref}, which does not exist")
 
 
 if __name__ == "__main__":

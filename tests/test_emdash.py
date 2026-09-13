@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the shared em-dash rule and the reminder hook that uses it.
+"""Tests for the em-dash rule in emdash.py.
 
 The rule: an em dash is allowed only as a MATCHED PAIR bracketing a
 mid-sentence aside. A lone dash is the violation.
@@ -13,15 +13,12 @@ scanner's first run, so both directions are asserted below rather than just
 the happy path.
 
 Run:
-  cd ~/obsidian-automation && source venv/bin/activate && python3 -m unittest discover tests -v
+  make test
 """
 
 from __future__ import annotations
 
-import importlib.util
-import json
 import os
-import subprocess
 import sys
 import unittest
 
@@ -36,10 +33,6 @@ import emdash  # noqa: E402
 # ([\s\S]*") would let one quotation mark anywhere in trailing prose extend
 # the span to end of line and swallow a real lone dash, silently.
 CITE_RE = r'EVIDENCE:[^"\n]*"[^"\n]*"'
-
-
-HOOK = os.path.expanduser("~/.claude/hooks/emdash_reminder.py")
-MODULE = os.path.join(REPO, "lib", "emdash.py")
 
 
 class LoneDashTest(unittest.TestCase):

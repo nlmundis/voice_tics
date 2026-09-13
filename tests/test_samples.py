@@ -17,6 +17,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import vt_config as config_mod  # noqa: E402
 import voice_tics as vt  # noqa: E402
+from tests import support  # noqa: E402
+
+
+def setUpModule() -> None:
+    support.enter_hermetic_cwd()
+
+
+def tearDownModule() -> None:
+    support.leave_hermetic_cwd()
 
 
 class ReadSamplesTest(unittest.TestCase):

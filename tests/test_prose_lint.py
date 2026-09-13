@@ -24,7 +24,6 @@ import io
 import json
 import os
 import sys
-import tempfile
 import unittest
 
 
@@ -42,6 +41,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import prose_lint  # noqa: E402
 import voice_tics  # noqa: E402
+from tests import support  # noqa: E402
+
+
+def setUpModule() -> None:
+    support.enter_hermetic_cwd()
+
+
+def tearDownModule() -> None:
+    support.leave_hermetic_cwd()
 
 
 def _rules(found):
@@ -597,20 +605,13 @@ class BannedPhraseConfig(unittest.TestCase):
 
 
 def _tmp_cfg(text: str) -> str:
-    """Write a throwaway voice_tics.toml and return its path."""
-    fh = tempfile.NamedTemporaryFile(
-        "w", suffix=".toml", delete=False, encoding="utf-8")
-    fh.write(text)
-    fh.close()
-    return fh.name
+    """Write a throwaway config file and return its path."""
+    return support.scratch_file(text, suffix=".toml")
 
 
 def _tmp(text: str) -> str:
-    fh = tempfile.NamedTemporaryFile(
-        "w", suffix=".md", delete=False, encoding="utf-8")
-    fh.write(text)
-    fh.close()
-    return fh.name
+    """Write a throwaway markdown file and return its path."""
+    return support.scratch_file(text, suffix=".md")
 
 
 def _run_main(argv):
@@ -667,11 +668,9 @@ class Cli(unittest.TestCase):
     def test_undecodable_file_is_a_usage_error_not_a_lint_failure(self):
         # Exit 1 means "the prose has tics"; a latin-1 file must not be
         # recorded as a prose violation by a pipeline keyed on that code.
-        fh = tempfile.NamedTemporaryFile("wb", suffix=".md", delete=False)
-        fh.write(b"caf\xe9 test\n")  # latin-1 e-acute: invalid as UTF-8
-        fh.close()
+        path = support.scratch_file(b"caf\xe9 test\n")  # latin-1 e-acute
         with contextlib.redirect_stderr(io.StringIO()):
-            code, _ = _run_main([fh.name])
+            code, _ = _run_main([path])
         self.assertEqual(code, 2)
 
     def test_json_shape(self):

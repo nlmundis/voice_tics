@@ -582,8 +582,12 @@ def read_samples(pattern: str,
         matched on is register: instructions typed to an agent are short and
         imperative, so the constructions you reach for in long-form prose
         barely occur, and no threshold over this corpus will ever surface
-        them. Measured on the reference corpus: 8.9 words per sentence on the
-        chat side against 12.2 on the model's.
+        them. Measured on the reference author's transcripts over a 14-day
+        window on 2026-09-12: 8.9 words per sentence on the chat side against
+        12.2 on the model's, from only 249 baseline words, so read it as the
+        direction of the gap rather than its size. (The 13.89 / 13.85 figures
+        elsewhere in this repo are a different measurement: a 45-day window
+        on 2026-08-13, after harness-composed records were removed.)
 
         Samples are matched on register and on author, which is what you
         actually want when the thing being linted is a document. What they

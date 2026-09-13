@@ -1,0 +1,27 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The tool itself needs nothing installed. Before the unit suite runs,
+      # prove that on this interpreter with an empty environment: both entry
+      # points must start with no third-party package importable.
+      - run: python -E -s voice_tics.py --help > /dev/null
+      - run: echo "Plain words here." | python -E -s prose_lint.py -
+      # The suite reads config files, which needs tomli below 3.11, and the
+      # mutation gate is a separate tool; its install brings tomli too.
+      - run: pip install "mutt_check @ git+https://github.com/nlmundis/mutt_check@v0.0.2"
+      - run: make check PYTHON=python

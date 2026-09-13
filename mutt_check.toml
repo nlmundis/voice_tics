@@ -240,3 +240,37 @@ suites = ["tests.test_emdash.LoneDashTest"]
 file = "emdash.py"
 find = "        if is_cell:"
 replace = "        if True:"
+
+# --- the published claims: stdlib only, a gate that cannot skip -----------
+
+[[mutant]]
+name = "config_parser_imported_at_module_scope"
+why = "On 3.9 and 3.10 there is no tomllib; a module-scope import kills both entry points before argparse, config file or not."
+suites = ["tests.test_repo.StdlibOnlyTest"]
+file = "vt_config.py"
+find = 'CONFIG_NAME = "voice_tics.toml"'
+replace = "import tomllib\nCONFIG_NAME = \"voice_tics.toml\""
+
+[[mutant]]
+name = "suite_reads_the_developers_own_config"
+why = "main() reads ./voice_tics.toml; run from the repo root, a personal config turns the suite red for reasons unrelated to the code."
+suites = ["tests.test_repo.HermeticSuiteTest"]
+file = "tests/support.py"
+find = "    os.chdir(tmp.name)"
+replace = "    pass"
+
+[[mutant]]
+name = "scratch_files_written_to_the_shared_temp_dir"
+why = "Fifteen files left in TMPDIR per run, accumulating run over run; inside the module's own directory one cleanup removes them all."
+suites = ["tests.test_repo.HermeticSuiteTest"]
+file = "tests/support.py"
+find = "    directory = _stack[-1].name"
+replace = "    directory = tempfile.gettempdir()"
+
+[[mutant]]
+name = "missing_gate_reads_as_a_passed_gate"
+why = "A mutation gate that skips when its tool is absent turns `make check` green without checking anything."
+suites = ["tests.test_repo.GateTest"]
+file = "Makefile"
+find = "\t  exit 2; \\"
+replace = "\t  exit 0; \\"
