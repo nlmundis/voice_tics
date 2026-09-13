@@ -122,6 +122,38 @@ def _as_str_list(value: Any, where: str) -> List[str]:
     return list(value)
 
 
+def _parse_tiers(lint: Mapping[str, Any]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """``[lint] error`` and ``[lint] warn``, each key in at most one place.
+
+    A key listed in both tiers produced two findings for every match, one of
+    each tier, which no one can have meant: it is what moving a key between
+    tiers and forgetting the old line looks like. A key listed twice in one
+    tier doubled every finding. Both are rejected rather than resolved,
+    because picking a tier on the user's behalf is a setting they did not
+    choose.
+    """
+    error = (tuple(_as_str_list(lint["error"], "[lint] error"))
+             if "error" in lint else DEFAULT_ERROR_TICS)
+    warn = (tuple(_as_str_list(lint["warn"], "[lint] warn"))
+            if "warn" in lint else DEFAULT_WARN_TICS)
+    for name, keys in (("[lint] error", error), ("[lint] warn", warn)):
+        repeated = sorted({k for k in keys if keys.count(k) > 1})
+        if repeated:
+            raise ConfigError(f"{name} lists {', '.join(repeated)} more than once")
+    both = sorted(set(error) & set(warn))
+    if both:
+        # Name the default when it is the default that collides: someone who
+        # writes only `warn = ["method_defence"]` never typed an error list.
+        error_name = ("[lint] error" if "error" in lint
+                      else "[lint] error (its default, since error is unset)")
+        warn_name = ("[lint] warn" if "warn" in lint
+                     else "[lint] warn (its default, since warn is unset)")
+        raise ConfigError(
+            f"{', '.join(both)} is in both {error_name} and {warn_name}; "
+            "a rule has one tier")
+    return error, warn
+
+
 def _parse_keep_domains(value: Any) -> Tuple[str, ...]:
     """Validate ``[output] keep_domains`` into bare, lowercased domains.
 
@@ -151,6 +183,19 @@ def _parse_keep_domains(value: Any) -> Tuple[str, ...]:
     return tuple(out)
 
 
+def banned_words(phrase: str) -> List[str]:
+    """The words of a banned phrase, split where the matcher joins them.
+
+    THE single normalisation of a banned phrase. ``prose_lint.banned_pattern``
+    joins these words with "any run of spaces or hyphens", so the duplicate
+    check and the finding's rule name must split on exactly that too. When
+    the duplicate check folded case and spaces but not hyphens,
+    ``load-bearing`` and ``load bearing`` compiled to one regex and were both
+    accepted, and every hit was reported twice at two tiers.
+    """
+    return [w for w in re.split(r"[-\s]+", phrase.strip()) if w]
+
+
 def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
     """Validate ``[lint] banned`` into (phrase, instead, tier) triples.
 
@@ -168,8 +213,9 @@ def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
         reason someone typed it.
 
     Raises:
-        ConfigError: A malformed entry, an empty phrase, or a tier that is
-            not "error" or "warn".
+        ConfigError: A malformed entry, a phrase with no words once spaces
+            and hyphens are removed, a tier that is not "error" or
+            "warning", or a phrase that repeats an earlier one.
     """
     if not isinstance(value, list):
         raise ConfigError("[lint] banned must be an array of tables")
@@ -183,6 +229,12 @@ def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
         phrase = entry.get("phrase")
         if not isinstance(phrase, str) or not phrase.strip():
             raise ConfigError(f"{where} needs a non-empty string phrase")
+        if not banned_words(phrase):
+            # "--" passed the emptiness check and compiled to an empty
+            # pattern, which reported an error at every character offset.
+            raise ConfigError(
+                f"{where} ({phrase!r}) has nothing to match: spaces and "
+                "hyphens are the gaps between words, not words")
         instead = entry.get("instead", "")
         if not isinstance(instead, str):
             raise ConfigError(f"{where} ({phrase}) instead must be a string")
@@ -191,7 +243,7 @@ def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
             raise ConfigError(
                 f"{where} ({phrase}) tier must be \"error\" or \"warning\", "
                 f"not {tier!r}")
-        key = " ".join(phrase.lower().split())
+        key = " ".join(banned_words(phrase.lower()))
         if key in seen:
             raise ConfigError(
                 f"{where} repeats the phrase {phrase!r} from entry {seen[key]}")
@@ -217,7 +269,7 @@ def _parse_signatures(value: Any) -> Tuple[Tuple[str, str], ...]:
             raise ConfigError(f"{where} must be a table with name and pattern")
         _reject_unknown(entry, SIGNATURE_KEYS, where)
         name, pattern = entry.get("name"), entry.get("pattern")
-        if not isinstance(name, str) or not name:
+        if not isinstance(name, str) or not name.strip():
             raise ConfigError(f"{where} needs a non-empty string name")
         if not isinstance(pattern, str) or not pattern:
             raise ConfigError(f"{where} ({name}) needs a non-empty string pattern")
@@ -323,15 +375,14 @@ class Config:
         if not isinstance(samples, str):
             raise ConfigError("[baseline] samples must be a string glob")
 
+        error_tics, warn_tics = _parse_tiers(lint)
         return cls(
             transcripts=transcripts,
             samples=samples,
             signatures=_parse_signatures(baseline["signatures"])
             if "signatures" in baseline else (),
-            error_tics=_as_str_list(lint["error"], "[lint] error")
-            if "error" in lint else DEFAULT_ERROR_TICS,
-            warn_tics=_as_str_list(lint["warn"], "[lint] warn")
-            if "warn" in lint else DEFAULT_WARN_TICS,
+            error_tics=error_tics,
+            warn_tics=warn_tics,
             emdash_enabled=enabled,
             emdash_exempt=exempt,
             banned=_parse_banned(lint["banned"]) if "banned" in lint else (),
@@ -341,7 +392,12 @@ class Config:
 
 
 def load(path: str = "") -> Config:
-    """The config at ``path``, or the nearest ``voice_tics.toml``, or defaults.
+    """The config at ``path``, or ``./voice_tics.toml``, or defaults.
+
+    Only the working directory is searched, never its parents: which file
+    governs a run should not depend on where above you someone left one.
+    ``unread_parent_config`` exists so a caller can say when that choice
+    skipped a file.
 
     Args:
         path: An explicit config file. Missing it is an error, because a
@@ -375,3 +431,34 @@ def load(path: str = "") -> Config:
     except toml.TOMLDecodeError as exc:
         raise ConfigError(f"{target}: {exc}") from None
     return Config.parse(raw)
+
+
+def unread_parent_config(path: str = "", start: str = "") -> str:
+    """A note naming a parent directory's config that ``load`` did not read.
+
+    Run from a subdirectory of a project, the project's banned phrases and
+    tiers silently did not apply, and a lint gate went green. Discovery stays
+    in the working directory (see ``load``); this makes the skip visible.
+
+    Args:
+        path: The ``--config`` the user passed, if any. A named config means
+            nothing was skipped.
+        start: Directory to search from; the working directory by default.
+
+    Returns:
+        A one-line note for stderr, or "" when a config was named, one exists
+        in the working directory, or no parent has one.
+    """
+    if path:
+        return ""
+    here = os.path.abspath(start or os.getcwd())
+    if os.path.exists(os.path.join(here, CONFIG_NAME)):
+        return ""
+    parent = os.path.dirname(here)
+    while parent != here:
+        candidate = os.path.join(parent, CONFIG_NAME)
+        if os.path.isfile(candidate):
+            return (f"note: {candidate} was not read; config is read from "
+                    "the working directory only. Pass --config to use it.")
+        here, parent = parent, os.path.dirname(parent)
+    return ""

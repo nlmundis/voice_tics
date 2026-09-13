@@ -129,6 +129,10 @@ default error tics.
 cp voice_tics.toml.example voice_tics.toml
 ```
 
+The file is read from the working directory only, never from a parent. Run
+from a subdirectory, the tool uses its defaults and prints a note naming the
+parent config it did not read; pass `--config` to use that file.
+
 What lives in the config is what is a fact about **you**: your signature
 phrases, where your writing is, which detectors may fail your build, the
 domains you do not need redacted. What lives in the code is what is a claim

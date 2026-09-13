@@ -267,7 +267,7 @@ def banned_pattern(phrase: str) -> Pattern[str]:
     with a word character. Without that check, banning "C++" would compile to
     a boundary that can never match after the final "+".
     """
-    words = [re.escape(w) for w in re.split(r"[-\s]+", phrase.strip()) if w]
+    words = [re.escape(w) for w in config_mod.banned_words(phrase)]
     body = r"[-\s]+".join(words)
     lead = r"\b" if re.match(r"\w", phrase.strip()) else ""
     tail = r"\b" if re.search(r"\w$", phrase.strip()) else ""
@@ -290,7 +290,7 @@ def _banned_findings(text: str,
         why = f"banned phrase; instead: {instead}" if instead else "banned phrase"
         for m in banned_pattern(phrase).finditer(prose):
             out.append(Finding(
-                rule=f"banned:{' '.join(phrase.lower().split())}",
+                rule=f"banned:{' '.join(config_mod.banned_words(phrase.lower()))}",
                 tier=tier,
                 line=_line_of(m.start(), prose),
                 excerpt=_excerpt(m.group(0)),
@@ -380,6 +380,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except config_mod.ConfigError as exc:
         print(f"prose_lint: config: {exc}", file=sys.stderr)
         return 2
+    note = config_mod.unread_parent_config(args.config)
+    if note:
+        print(f"prose_lint: {note}", file=sys.stderr)
     try:
         # Compiled once, before any file is read, so an unknown tic key fails
         # the run instead of the first file that happens to reach it.

@@ -265,6 +265,25 @@ class SamplesConfigTest(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_a_blank_signature_name_is_rejected(self) -> None:
+        """A row with a blank label cannot be traced to the line that asked."""
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.Config.parse({"baseline": {"signatures": [
+                {"name": "   ", "pattern": "x"}]}})
+
+    def test_an_invalid_signature_pattern_fails_at_load(self) -> None:
+        """Not halfway through a scan, as an uncaught re.error traceback."""
+        with self.assertRaises(config_mod.ConfigError) as ctx:
+            config_mod.Config.parse({"baseline": {"signatures": [
+                {"name": "broken", "pattern": "(unclosed"}]}})
+        self.assertIn("broken", str(ctx.exception))
+
+    def test_an_invalid_emdash_exemption_fails_at_load(self) -> None:
+        """emdash.exempt_spans treats a bad pattern as no exemption, by
+        design, so without this a typo would disarm the exemption silently."""
+        with self.assertRaises(config_mod.ConfigError):
+            config_mod.Config.parse({"lint": {"emdash": {"exempt": "(unclosed"}}})
+
     def test_unknown_baseline_key_is_rejected_with_a_suggestion(self) -> None:
         with self.assertRaises(config_mod.ConfigError) as ctx:
             config_mod.Config.parse({"baseline": {"sample": "x"}})

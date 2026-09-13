@@ -180,8 +180,8 @@ name = "banned_phrase_treated_as_a_regex"
 why = "A phrase is typed by someone sick of it, not authored as a pattern; 'C++' as a regex is an error."
 suites = ["tests.test_prose_lint.BannedPhrases"]
 file = "prose_lint.py"
-find = '    words = [re.escape(w) for w in re.split(r"[-\s]+", phrase.strip()) if w]'
-replace = '    words = [w for w in re.split(r"[-\s]+", phrase.strip()) if w]'
+find = '    words = [re.escape(w) for w in config_mod.banned_words(phrase)]'
+replace = '    words = [w for w in config_mod.banned_words(phrase)]'
 
 [[mutant]]
 name = "hyphen_and_space_are_different_phrases"
@@ -552,3 +552,69 @@ suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
 file = "voice_tics.py"
 find = '        stats["turns"] = stats.get("turns", 0) - set_aside'
 replace = "        pass"
+
+# --- config: one tier, one spelling, no inert entries ----------------------
+
+[[mutant]]
+name = "banned_phrase_of_hyphens_accepted"
+why = "It compiles to an empty pattern that reports an error at every character offset."
+suites = ["tests.test_prose_lint.BannedPhraseConfig"]
+file = "vt_config.py"
+find = "        if not banned_words(phrase):"
+replace = "        if False:"
+
+[[mutant]]
+name = "banned_duplicate_check_ignores_hyphens"
+why = "load-bearing and load bearing compile to one regex; both were accepted and every hit reported twice."
+suites = ["tests.test_prose_lint.BannedPhraseConfig"]
+file = "vt_config.py"
+find = '        key = " ".join(banned_words(phrase.lower()))'
+replace = '        key = " ".join(phrase.lower().split())'
+
+[[mutant]]
+name = "rule_in_both_tiers_accepted"
+why = "Two findings per match at contradictory tiers is a setting nobody can have meant."
+suites = ["tests.test_prose_lint.TierConfig"]
+file = "vt_config.py"
+find = "    both = sorted(set(error) & set(warn))"
+replace = "    both = []"
+
+[[mutant]]
+name = "rule_repeated_in_one_tier_accepted"
+why = "A key listed twice doubles every finding."
+suites = ["tests.test_prose_lint.TierConfig"]
+file = "vt_config.py"
+find = "        repeated = sorted({k for k in keys if keys.count(k) > 1})"
+replace = "        repeated = []"
+
+[[mutant]]
+name = "parent_config_skipped_silently"
+why = "From a subdirectory the project's bans and tiers did not apply and the gate went green with no sign."
+suites = ["tests.test_prose_lint.ParentConfigNote"]
+file = "vt_config.py"
+find = "        if os.path.isfile(candidate):"
+replace = "        if False:"
+
+[[mutant]]
+name = "blank_signature_name_accepted"
+why = "A whitespace name prints a row nobody can trace to the config line that asked for it."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "        if not isinstance(name, str) or not name.strip():"
+replace = "        if not isinstance(name, str) or not name:"
+
+[[mutant]]
+name = "signature_pattern_not_validated_at_load"
+why = "A typo fails halfway through a scan as a traceback instead of at startup beside the line that caused it."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "            re.compile(pattern)\n        except re.error as exc:"
+replace = "            pass\n        except re.error as exc:"
+
+[[mutant]]
+name = "emdash_exemption_not_validated_at_load"
+why = "The em-dash walker treats a bad pattern as no exemption, so a typo would disarm it silently."
+suites = ["tests.test_samples.SamplesConfigTest"]
+file = "vt_config.py"
+find = "                re.compile(exempt)\n            except re.error as exc:"
+replace = "                pass\n            except re.error as exc:"

@@ -1426,6 +1426,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except config_mod.ConfigError as exc:
         print(f"config: {exc}", file=sys.stderr)
         return 2
+    note = config_mod.unread_parent_config(a.config)
+    if note:
+        print(note, file=sys.stderr)
     # An explicit --glob wins over the config file, which wins over the
     # built-in default. Stated here rather than in argparse defaults so the
     # precedence is one readable line instead of an interaction.

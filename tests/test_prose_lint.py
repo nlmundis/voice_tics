@@ -604,6 +604,103 @@ class BannedPhraseConfig(unittest.TestCase):
             self._parse([{"phrase": "x", "replace": "y"}])
 
 
+    def test_a_phrase_with_no_words_is_rejected(self) -> None:
+        """"--" compiled to an empty pattern: an error at every character."""
+        import vt_config as config_mod
+        for phrase in ("-", "--", " - ", "- -"):
+            with self.subTest(phrase=phrase):
+                with self.assertRaises(config_mod.ConfigError):
+                    self._parse([{"phrase": phrase}])
+
+    def test_hyphen_and_space_spellings_are_one_phrase(self) -> None:
+        """They compile to one regex, so both would report every hit twice,
+        and the default-error twin overrode a warning the user asked for."""
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError):
+            self._parse([{"phrase": "load-bearing"},
+                         {"phrase": "load bearing", "tier": "warning"}])
+
+    def test_the_rule_name_does_not_depend_on_the_spelling(self) -> None:
+        cfg = self._parse([{"phrase": "Load-Bearing"}])
+        found, _ = prose_lint.lint_text("A load bearing wall.\n", cfg)
+        self.assertEqual([f.rule for f in found], ["banned:load bearing"])
+
+
+class TierConfig(unittest.TestCase):
+    """[lint] error and [lint] warn: a rule has exactly one tier."""
+
+    def _parse(self, lint):
+        import vt_config as config_mod
+        return config_mod.Config.parse({"lint": lint})
+
+    def test_a_key_in_both_tiers_is_rejected(self) -> None:
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError) as caught:
+            self._parse({"error": ["not_x_but_y"], "warn": ["not_x_but_y"]})
+        self.assertIn("not_x_but_y", str(caught.exception))
+
+    def test_a_key_repeated_in_one_tier_is_rejected(self) -> None:
+        import vt_config as config_mod
+        for tier in ("error", "warn"):
+            with self.subTest(tier=tier):
+                with self.assertRaises(config_mod.ConfigError):
+                    self._parse({tier: ["let_me", "let_me"]})
+
+    def test_a_default_tier_key_listed_in_the_other_is_rejected(self) -> None:
+        """Moving a default error key to warn without also setting error."""
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError):
+            self._parse({"warn": ["method_defence"]})
+
+    def test_disjoint_tiers_load(self) -> None:
+        cfg = self._parse({"error": ["let_me"], "warn": ["not_x_but_y"]})
+        self.assertEqual((cfg.error_tics, cfg.warn_tics),
+                         (("let_me",), ("not_x_but_y",)))
+
+
+class ParentConfigNote(unittest.TestCase):
+    """Config is read from the working directory only, and says so."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self._tmp.name)
+        self.sub = os.path.join(self.root, "a", "b")
+        os.makedirs(self.sub)
+        with open(os.path.join(self.root, "voice_tics.toml"), "w") as fh:
+            fh.write('[lint]\nbanned = [ { phrase = "blast radius" } ]\n')
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_a_parent_config_is_named(self) -> None:
+        import vt_config as config_mod
+        note = config_mod.unread_parent_config("", start=self.sub)
+        self.assertIn(os.path.join(self.root, "voice_tics.toml"), note)
+        self.assertIn("--config", note)
+
+    def test_no_note_when_a_config_is_named_or_local(self) -> None:
+        import vt_config as config_mod
+        self.assertEqual(config_mod.unread_parent_config("x.toml", start=self.sub), "")
+        self.assertEqual(config_mod.unread_parent_config("", start=self.root), "")
+
+    def test_the_linter_prints_the_note_and_still_uses_defaults(self) -> None:
+        cwd = os.getcwd()
+        err = io.StringIO()
+        doc = os.path.join(self.sub, "doc.md")
+        with open(doc, "w") as fh:
+            fh.write("The blast radius is small.\n")
+        try:
+            os.chdir(self.sub)
+            with contextlib.redirect_stderr(err):
+                code, out = _run_main([doc])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(code, 0)
+        self.assertNotIn("banned", out)
+        self.assertIn("was not read", err.getvalue())
+
+
 def _tmp_cfg(text: str) -> str:
     """Write a throwaway config file and return its path."""
     return support.scratch_file(text, suffix=".toml")
