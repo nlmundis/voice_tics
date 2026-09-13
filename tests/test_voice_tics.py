@@ -437,6 +437,87 @@ class CorpusTest(unittest.TestCase):
         self.assertEqual(c.openers.most_common(1)[0][0], "let me check")
 
 
+class FenceScanTest(unittest.TestCase):
+    """fence_spans must agree with CODE_FENCE_RE, and must stay linear.
+
+    CODE_FENCE_RE is kept as the SPEC: it is the clearer statement of what a
+    fence is. fence_spans is the implementation, and these tests are what let
+    the two be trusted as the same thing.
+    """
+
+    TRICKY = [
+        "",
+        "no fences here",
+        "```\ncode\n```",
+        "```py\ncode\n```",
+        "   ```\ncode\n   ```",
+        "```\ncode\n```   ",
+        # A closer-shaped line that is really the next opener.
+        "```a\n```b\n```",
+        # Unclosed: the regex matches nothing, so neither may the scan.
+        "```a\nstill open",
+        "```a\n```b\nstill open",
+        # Two complete fences back to back.
+        "```\none\n```\n```\ntwo\n```",
+        # A fence line mid-line is literal text, not a fence.
+        "text ``` more\n``` \n",
+        "\t```\ncode\n\t```",
+        "```\n\n```",
+        "```\n```\n```\n```",
+    ]
+
+    def test_agrees_with_the_spec_regex_on_tricky_input(self) -> None:
+        for text in self.TRICKY:
+            with self.subTest(text=text):
+                want = [m.span() for m in vt.CODE_FENCE_RE.finditer(text)]
+                self.assertEqual(vt.fence_spans(text), want, text)
+
+    def test_agrees_with_the_spec_regex_on_random_input(self) -> None:
+        """Randomised, because the tricky list is only what someone thought of."""
+        import random
+        lines = ["```", "```py", "   ```", "```x", "text", "", "  ",
+                 "a ``` b", "\t```", "```   "]
+        rng = random.Random(7)
+        for _ in range(600):
+            text = "\n".join(rng.choice(lines) for _ in range(rng.randint(0, 12)))
+            if rng.random() < 0.5:
+                text += "\n"
+            want = [m.span() for m in vt.CODE_FENCE_RE.finditer(text)]
+            self.assertEqual(vt.fence_spans(text), want, repr(text))
+
+    def test_scrub_still_removes_fenced_code(self) -> None:
+        self.assertNotIn("secret", vt.scrub("before\n```\nsecret\n```\nafter"))
+        self.assertIn("before", vt.scrub("before\n```\nsecret\n```\nafter"))
+
+    def test_an_unclosed_fence_is_not_stripped(self) -> None:
+        """Matching the regex: an unterminated fence is literal text."""
+        text = "```\nthis is never closed"
+        self.assertEqual(vt.fence_spans(text), [])
+        self.assertIn("never closed", vt.scrub(text))
+
+    def test_keep_lines_preserves_the_line_count(self) -> None:
+        text = "a\n```\nx\ny\n```\nb"
+        self.assertEqual(vt.strip_fences(text, " ", True).count("\n"),
+                         text.count("\n"))
+
+    def test_unclosed_fences_do_not_blow_up(self) -> None:
+        """The reason fence_spans exists, pinned as a budget.
+
+        CODE_FENCE_RE is lazy and multiline, so it restarts at every opening
+        line and scans to end of input: measured 3.16s for this input. The
+        scan does it in about a millisecond. The budget is generous by three
+        orders of magnitude so this cannot flake on a loaded machine, while
+        still failing outright if the quadratic path ever comes back.
+        """
+        import time
+        text = "\n".join("```unclosed %d" % i for i in range(8000))
+        start = time.perf_counter()
+        spans = vt.fence_spans(text)
+        elapsed = time.perf_counter() - start
+        self.assertEqual(spans, [])
+        self.assertLess(elapsed, 0.5, f"fence scan took {elapsed:.3f}s")
+
+
 class PatternTest(unittest.TestCase):
     """The named structure and signature detectors."""
 

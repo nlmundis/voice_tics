@@ -147,6 +147,24 @@ file = "vt_redact.py"
 find = "def redact(text: str, keep_domains: Sequence[str] = ()) -> str:"
 replace = "def redact(text: str, keep_domains: Sequence[str] = (\"com\",)) -> str:"
 
+# --- the fence scan must stay linear AND stay equal to the spec ----------
+
+[[mutant]]
+name = "fence_closer_may_sit_on_the_opener_line"
+why = "A fence needs the newline between opener and closer; allowing equality would match a single ``` line as a whole fence."
+suites = ["tests.test_voice_tics.FenceScanTest"]
+file = "voice_tics.py"
+find = "        while index < len(closers) and closers[index][0] <= opener.start():"
+replace = "        while index < len(closers) and closers[index][0] < opener.start():"
+
+[[mutant]]
+name = "fence_spans_may_overlap"
+why = "Openers inside an already-consumed fence are body text, not fences; without this they would match again."
+suites = ["tests.test_voice_tics.FenceScanTest"]
+file = "voice_tics.py"
+find = "        if opener.start() < after:\n            continue"
+replace = "        if False:\n            continue"
+
 # --- banned phrases: a preference, kept out of the evidence ---------------
 
 [[mutant]]
