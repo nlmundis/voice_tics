@@ -67,6 +67,7 @@ def _toml_module() -> Any:
             "reading a config file on Python 3.10 or earlier needs tomli: "
             "pip install tomli") from None
 
+
 # The standard Claude Code transcript location. Every session writes a .jsonl
 # here holding both sides of the conversation, which is what makes a matched
 # baseline possible without asking anyone to collect anything.
@@ -119,6 +120,35 @@ def _as_str_list(value: Any, where: str) -> List[str]:
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise ConfigError(f"{where} must be an array of strings")
     return list(value)
+
+
+def _parse_keep_domains(value: Any) -> Tuple[str, ...]:
+    """Validate ``[output] keep_domains`` into bare, lowercased domains.
+
+    An entry spelled ``.example.com``, ``example.com.`` or with a stray space
+    matched nothing at all: the allowlist compares against the parsed domain,
+    so the entry was inert and every address it was meant to keep was
+    redacted anyway, with no sign the setting was not in force. Rejected here
+    rather than normalised, because a silently rewritten setting is the same
+    class of surprise as a silently ignored one.
+
+    Raises:
+        ConfigError: A non-string, an empty entry, or one carrying whitespace,
+            an ``@``, or a leading or trailing dot.
+    """
+    out: List[str] = []
+    for entry in _as_str_list(value, "[output] keep_domains"):
+        bare = entry.strip().strip(".")
+        if (not bare or bare != entry or "@" in entry
+                or any(ch.isspace() for ch in entry)):
+            hint = f'; write it as "{bare}", which covers its subdomains too' \
+                if bare and "@" not in bare and not any(
+                    ch.isspace() for ch in bare) else ""
+            raise ConfigError(
+                f"[output] keep_domains entry {entry!r} is not a bare "
+                f"domain{hint}")
+        out.append(entry.lower())
+    return tuple(out)
 
 
 def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
@@ -305,7 +335,7 @@ class Config:
             emdash_enabled=enabled,
             emdash_exempt=exempt,
             banned=_parse_banned(lint["banned"]) if "banned" in lint else (),
-            keep_domains=_as_str_list(output["keep_domains"], "[output] keep_domains")
+            keep_domains=_parse_keep_domains(output["keep_domains"])
             if "keep_domains" in output else (),
         )
 

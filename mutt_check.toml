@@ -274,3 +274,77 @@ suites = ["tests.test_repo.GateTest"]
 file = "Makefile"
 find = "\t  exit 2; \\"
 replace = "\t  exit 0; \\"
+
+# --- redaction: no allowlist of name characters, no fixed phone shape ------
+
+[[mutant]]
+name = "local_part_is_a_character_allowlist"
+why = "Every allowlist forgets a character, and each one prints the head of the name while the guard appears to fire."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = '    local = r"(?<![^%s])[^%s]+" % (_DELIMITERS, _DELIMITERS)'
+replace = '    local = r"[\w%s.%%+-]+" % marks'
+
+[[mutant]]
+name = "address_match_may_start_mid_token"
+why = "Without the start guard a long token is rescanned from every offset: quadratic on a base64 blob."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = '    local = r"(?<![^%s])[^%s]+" % (_DELIMITERS, _DELIMITERS)'
+replace = '    local = r"[^%s]+" % _DELIMITERS'
+
+[[mutant]]
+name = "mark_scan_stops_at_the_bmp"
+why = "Adlam is a living script with its marks above U+1E943; a domain carrying one was not matched at all."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = "    marks = [c for c in range(0x300, 0x110000)"
+replace = "    marks = [c for c in range(0x300, 0x10000)"
+
+[[mutant]]
+name = "phone_needs_a_separator_between_groups"
+why = "(555)123-4567, 5551234567 and every international rendering printed in cleartext."
+suites = ["tests.test_repo.RedactionTest"]
+file = "vt_redact.py"
+find = 'PHONE_RE = re.compile(r"(?<!\d)\+?\(?\d(?:%s{0,3}\d){9,14}(?!\d)" % _PHONE_SEP)'
+replace = 'PHONE_RE = re.compile(r"\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b")'
+
+[[mutant]]
+name = "inert_keep_domains_entry_accepted"
+why = "'.example.com' matches nothing, so the addresses it was meant to keep are redacted with no sign the setting is not in force."
+suites = ["tests.test_repo.KeepDomainsConfigTest"]
+file = "vt_config.py"
+find = "        if (not bare or bare != entry or \"@\" in entry"
+replace = "        if (not bare or \"@\" in entry"
+
+[[mutant]]
+name = "text_report_phrases_skip_redaction"
+why = "The belt under the source-text gate; nothing else would notice it gone until the tokeniser widens."
+suites = ["tests.test_voice_tics.SourceTextRedactionTest"]
+file = "voice_tics.py"
+find = "                       f\"{redact(f.phrase, keep_domains)}\")"
+replace = "                       f\"{f.phrase}\")"
+
+[[mutant]]
+name = "text_report_openers_skip_redaction"
+why = "The belt under the source-text gate; nothing else would notice it gone until the tokeniser widens."
+suites = ["tests.test_voice_tics.SourceTextRedactionTest"]
+file = "voice_tics.py"
+find = "                       f\"{redact(opener, keep_domains)}\")"
+replace = "                       f\"{opener}\")"
+
+[[mutant]]
+name = "json_phrases_skip_redaction"
+why = "The belt under the source-text gate; nothing else would notice it gone until the tokeniser widens."
+suites = ["tests.test_voice_tics.SourceTextRedactionTest"]
+file = "voice_tics.py"
+find = "phrase=redact(f.phrase, cfg.keep_domains))"
+replace = "phrase=f.phrase)"
+
+[[mutant]]
+name = "json_openers_skip_redaction"
+why = "The belt under the source-text gate; nothing else would notice it gone until the tokeniser widens."
+suites = ["tests.test_voice_tics.SourceTextRedactionTest"]
+file = "voice_tics.py"
+find = "            doc[\"openers\"] = [(redact(o, cfg.keep_domains), c) for o, c"
+replace = "            doc[\"openers\"] = [(o, c) for o, c"

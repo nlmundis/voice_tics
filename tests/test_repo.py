@@ -94,6 +94,79 @@ class RedactionTest(unittest.TestCase):
         text = "see build 1.2.3 and host:8080"
         self.assertEqual(vt_redact.redact(text), text)
 
+    def test_a_package_pin_is_not_an_address(self) -> None:
+        self.assertEqual(vt_redact.redact("pin pkg@1.2.3 here"),
+                         "pin pkg@1.2.3 here")
+
+    def test_no_character_in_a_name_publishes_its_head(self) -> None:
+        """Any allowlist of name characters forgets one, and each one it
+        forgets prints the head of the name while the guard appears to fire.
+        An apostrophe, the zero-width non-joiner of Persian orthography, and
+        an Adlam combining mark from outside the Basic Multilingual Plane."""
+        for address in ("mary.o'donnell@evil.net",
+                        "\u0646\u0627\u0635\u0631\u200c\u0645\u062d@vendor.io",
+                        "\U0001e922\U0001e945\U0001e926@vendor.io"):
+            with self.subTest(address=ascii(address)):
+                self.assertEqual(vt_redact.redact("to " + address),
+                                 "to [REDACTED-EMAIL]")
+
+    def test_a_mark_outside_the_bmp_in_the_domain_does_not_hide_it(self) -> None:
+        self.assertEqual(
+            vt_redact.redact("sam@\U0001e922\U0001e945\U0001e926.io"),
+            "[REDACTED-EMAIL]")
+
+    def test_an_address_in_punctuation_keeps_the_punctuation(self) -> None:
+        self.assertEqual(vt_redact.redact("(sam@vendor.io)"),
+                         "([REDACTED-EMAIL])")
+        self.assertEqual(vt_redact.redact("mailto:sam@vendor.io"),
+                         "mailto:[REDACTED-EMAIL]")
+
+    def test_a_long_run_without_an_address_is_linear(self) -> None:
+        """The start-at-a-delimiter guard: without it, every offset of a long
+        token is rescanned to the end, and 100,000 characters take minutes."""
+        import time
+        started = time.perf_counter()
+        vt_redact.redact("a" * 100000)
+        self.assertLess(time.perf_counter() - started, 2.0)
+
+    def test_every_common_phone_rendering_is_redacted(self) -> None:
+        """One separator between every group was required, so the two most
+        common US renderings and every international one printed in the clear."""
+        for number in ("555-123-4567", "(555) 123-4567", "(555)123-4567",
+                       "5551234567", "555.123.4567", "555\u2013123\u20134567",
+                       "+1 555 123 4567", "+44 20 7946 0958", "020 7946 0958",
+                       "+33 6 12 34 56 78", "+49 30 901820"):
+            with self.subTest(number=number):
+                self.assertEqual(vt_redact.redact(f"call {number} today"),
+                                 "call [REDACTED-PHONE] today")
+
+    def test_short_numbers_are_not_phones(self) -> None:
+        for text in ("in 2026-09-12", "count 123456789", "ext 4567"):
+            with self.subTest(text=text):
+                self.assertEqual(vt_redact.redact(text), text)
+
+
+class KeepDomainsConfigTest(unittest.TestCase):
+    """An allowlist entry that can match nothing must not load silently."""
+
+    def _parse(self, domains):
+        return config_mod.Config.parse({"output": {"keep_domains": domains}})
+
+    def test_a_bare_domain_is_accepted_lowercased(self) -> None:
+        self.assertEqual(self._parse(["Mine.com"]).keep_domains, ("mine.com",))
+
+    def test_entries_that_would_match_nothing_are_rejected(self) -> None:
+        for entry in (".mine.com", "mine.com.", " mine.com", "mine .com",
+                      "sam@mine.com", ""):
+            with self.subTest(entry=entry):
+                with self.assertRaises(config_mod.ConfigError):
+                    self._parse([entry])
+
+    def test_the_error_names_the_spelling_that_works(self) -> None:
+        with self.assertRaises(config_mod.ConfigError) as caught:
+            self._parse([".mine.com"])
+        self.assertIn('"mine.com"', str(caught.exception))
+
 
 class ExampleConfigTest(unittest.TestCase):
     """The shipped examples must parse, or they are worse than absent."""

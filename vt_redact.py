@@ -22,8 +22,8 @@ THE DEFAULT IS TO REDACT
     value, and the person who would be hurt by it is never the person who
     installed the tool.
 
-TWO BUGS WORTH CARRYING FORWARD
-    Both are the reason the patterns look the way they do, and both failed in
+THREE BUGS WORTH CARRYING FORWARD
+    All are the reason the patterns look the way they do, and all failed in
     the direction that leaks rather than the direction that over-redacts.
 
     1. The address pattern was ASCII-only, so ``josé@vendor.io`` was never
@@ -31,11 +31,23 @@ TWO BUGS WORTH CARRYING FORWARD
        TAIL of a non-ASCII local part, so ``maríagit@vendor.io`` matched
        ``agit@vendor.io`` and redacted to ``marí[REDACTED-EMAIL]`` —
        publishing the head of the name in cleartext while looking like the
-       guard had fired. Widened rather than replaced: every character the old
-       pattern accepted is still accepted, so this can only ever match MORE.
-       For a redactor that is the safe direction — an over-match costs one
-       over-redacted string, visible in the diff, where an under-match is a
-       leak nobody sees.
+       guard had fired.
+
+       Widening the character class fixed that name and not the bug. Any
+       allowlist of characters has a character it forgot, and each one
+       reopens the same leak: an apostrophe (``mary.o'donnell@``), the
+       zero-width non-joiner of Persian orthography, a combining mark outside
+       the Basic Multilingual Plane (Adlam, a living script). So the local
+       part is no longer a list of what an address may contain. It is
+       everything back to the previous DELIMITER — whitespace or one of the
+       RFC 5322 specials — so a tail-only match cannot happen whatever the
+       name holds. (A match is also only allowed to START at a delimiter.
+       That changes no answer, since the leftmost match already begins
+       there; it keeps a long run of non-delimiters, a base64 blob say, from
+       being rescanned from every offset in it.) For a redactor
+       that is the safe direction: an over-match costs one over-redacted
+       string, visible in the diff, where an under-match is a leak nobody
+       sees.
 
     2. The allowlist test was a plain substring check, which failed open three
        ways, each leaving a real external address unredacted::
@@ -46,22 +58,34 @@ TWO BUGS WORTH CARRYING FORWARD
 
        It is anchored to the parsed domain now. Subdomains stay allowlisted
        (``jira@mail.example.com`` under ``example.com``), which is the intent
-       of the rule and the reason for the leading dot rather than a bare
-       ``endswith``.
+       of the rule and the reason the comparison adds a dot rather than using
+       a bare ``endswith``. Write allowlist entries bare, ``example.com``: the
+       config rejects ``.example.com``, which would otherwise match nothing.
+
+    3. The phone pattern demanded one separator between every digit group,
+       so ``(555)123-4567``, a bare ``5551234567`` and every international
+       rendering printed in cleartext. A phone number is now any run of ten
+       to fifteen digits (the E.164 range), optionally led by ``+`` or a
+       parenthesis, with up to three separators between digits. That
+       over-redacts a long digit run that is not a phone, which is the
+       direction this module is allowed to fail in. Seven-digit local
+       numbers are not matched: at that length a phone is indistinguishable
+       from an ordinary count or identifier.
 """
 
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
-from typing import Sequence, Tuple
+from typing import Pattern, Sequence
 
 EMAIL_TOKEN = "[REDACTED-EMAIL]"
 PHONE_TOKEN = "[REDACTED-PHONE]"
 
 
 def _combining_mark_class() -> str:
-    """Character-class body covering every combining mark in the BMP.
+    """Character-class body covering every combining mark in Unicode.
 
     Returns:
         A string of ``\\uXXXX`` escapes and ranges, safe to splice between the
@@ -75,36 +99,53 @@ def _combining_mark_class() -> str:
     stale against Python's Unicode version somewhere nobody looks; this costs
     about five milliseconds at import and cannot.
 
-    Scanned over the BMP only. The supplementary planes carry marks for
-    historic scripts and musical notation, which is not where mailbox names
-    live, and scanning them costs fifteen times as much.
+    Scanned over every plane. It once stopped at the BMP on the reasoning
+    that the supplementary planes hold only historic scripts, which is false:
+    Adlam, a living script for Fulani, has its marks at U+1E944 and above.
+    The full scan costs about a tenth of a second, which is why the patterns
+    are compiled on the first ``redact`` call rather than at import: the
+    linter imports this module and never redacts.
     """
-    marks = [c for c in range(0x300, 0x10000)
+    marks = [c for c in range(0x300, 0x110000)
              if unicodedata.category(chr(c)).startswith("M")]
     parts, start, previous = [], marks[0], marks[0]
     for code in marks[1:] + [-1]:
         if code != previous + 1:
-            parts.append("\\u%04x" % start if start == previous
-                         else "\\u%04x-\\u%04x" % (start, previous))
+            parts.append("\\U%08x" % start if start == previous
+                         else "\\U%08x-\\U%08x" % (start, previous))
             start = code
         previous = code
     return "".join(parts)
 
 
-_MARKS = _combining_mark_class()
-# A local part or a domain label. ``\w`` is Unicode-aware for str patterns, so
-# it already spans every script's letters and digits; the marks are what it
-# misses.
-_LOCAL_CHAR = r"[\w%s.%%+-]" % _MARKS
-_LABEL_CHAR = r"[\w%s.-]" % _MARKS
-# The trailing label, kept to letters — ``[^\W\d_]`` is ``\w`` minus digits and
-# underscore, i.e. a Unicode letter — so a bare host:port or a dotted version
-# number is still not an address. Marks belong here too: the second character
-# of the IDN TLD ``.संगठन`` is one.
-_TLD_CHAR = r"(?:[^\W\d_]|[%s])" % _MARKS
+# What ends a local part: whitespace and the RFC 5322 specials, plus "@".
+# Everything else, apostrophes and joiners included, belongs to the name.
+_DELIMITERS = r"\s@<>()\[\]\\,;:\""
 
-EMAIL_RE = re.compile(r"%s+@%s+\.%s{2,}" % (_LOCAL_CHAR, _LABEL_CHAR, _TLD_CHAR))
-PHONE_RE = re.compile(r"\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b")
+
+@functools.lru_cache(maxsize=None)
+def email_pattern() -> Pattern[str]:
+    """The compiled address pattern, built on first use.
+
+    The local part is a negated class (see bug 1 in the module docstring) and
+    the match must begin at a delimiter or at the start of the text. A domain
+    label is a Unicode word character, a combining mark from any plane, a
+    zero-width joiner or non-joiner, a dot or a hyphen. The trailing label is
+    kept to letters and marks, so a bare host:port or a dotted version number
+    such as ``pkg@1.2.3`` is still not an address; marks belong there too,
+    since the second character of the IDN TLD ``.संगठन`` is one.
+    """
+    marks = _combining_mark_class()
+    label = r"[\w%s\u200c\u200d.-]" % marks
+    tld = r"(?:[^\W\d_]|[%s])" % marks
+    local = r"(?<![^%s])[^%s]+" % (_DELIMITERS, _DELIMITERS)
+    return re.compile(r"%s@%s+\.%s{2,}" % (local, label, tld))
+
+
+# Separators a phone number is written with: space, tab, no-break space,
+# parentheses, dot, hyphen and the Unicode dashes U+2010 to U+2015.
+_PHONE_SEP = "[ \t\u00a0().\\-\u2010-\u2015]"
+PHONE_RE = re.compile(r"(?<!\d)\+?\(?\d(?:%s{0,3}\d){9,14}(?!\d)" % _PHONE_SEP)
 
 
 def is_allowlisted(email: str, keep_domains: Sequence[str]) -> bool:
@@ -144,4 +185,4 @@ def redact(text: str, keep_domains: Sequence[str] = ()) -> str:
         address = m.group(0)
         return address if is_allowlisted(address, keep_domains) else EMAIL_TOKEN
 
-    return PHONE_RE.sub(PHONE_TOKEN, EMAIL_RE.sub(_email_sub, text))
+    return PHONE_RE.sub(PHONE_TOKEN, email_pattern().sub(_email_sub, text))

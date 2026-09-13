@@ -673,6 +673,61 @@ class PatternTest(unittest.TestCase):
                          {"alpha", "beta"})
 
 
+class SourceTextRedactionTest(unittest.TestCase):
+    """Every source-text string that prints goes through ``redact``.
+
+    Today the tokeniser strips the characters redaction keys on, so no real
+    corpus can reach these paths with an address in it. The belt exists for
+    the day that changes, which is exactly when nobody would notice one of
+    the four calls had gone. So the address is planted past the tokeniser.
+    """
+
+    ADDRESS = "sam@vendor.io"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._tmp.name)
+        _session([_rec("user", "a plain request"),
+                  _rec("assistant", "A plain answer.")], self.tmp)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, *extra: str) -> str:
+        import contextlib
+        import io
+        from unittest import mock
+        planted = vt.Finding(phrase=self.ADDRESS, width=1, mine=5,
+                             mine_rate=1.0, theirs=0, theirs_rate=1.0,
+                             ratio=1.0)
+        real_add = vt.Corpus.add
+
+        def add(corpus, text, *args, **kwargs):
+            real_add(corpus, text, *args, **kwargs)
+            corpus.openers[self.ADDRESS] += 1
+
+        buf = io.StringIO()
+        with mock.patch.object(vt, "rank_phrases", return_value=[planted]), \
+                mock.patch.object(vt.Corpus, "add", add), \
+                contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl"),
+                          "--include-source-text", *extra])
+        self.assertEqual(rc, 0)
+        return buf.getvalue()
+
+    def test_the_text_report_redacts_phrases_and_openers(self) -> None:
+        out = self._run()
+        self.assertNotIn(self.ADDRESS, out)
+        self.assertEqual(out.count("[REDACTED-EMAIL]"), 2)
+
+    def test_the_json_report_redacts_phrases_and_openers(self) -> None:
+        out = self._run("--json")
+        self.assertNotIn(self.ADDRESS, out)
+        doc = json.loads(out)
+        self.assertEqual(doc["phrases"][0]["phrase"], "[REDACTED-EMAIL]")
+        self.assertIn("[REDACTED-EMAIL]", [o for o, _ in doc["openers"]])
+
+
 class MainTest(unittest.TestCase):
     """End-to-end, including the flip that --speaker performs."""
 
