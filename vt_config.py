@@ -62,7 +62,8 @@ DEFAULT_WARN_TICS: Tuple[str, ...] = ("appositive_negation",)
 TOP_KEYS = frozenset({"corpus", "baseline", "lint", "output"})
 CORPUS_KEYS = frozenset({"transcripts"})
 BASELINE_KEYS = frozenset({"signatures", "samples"})
-LINT_KEYS = frozenset({"error", "warn", "emdash"})
+LINT_KEYS = frozenset({"error", "warn", "emdash", "banned"})
+BANNED_KEYS = frozenset({"phrase", "instead", "tier"})
 EMDASH_KEYS = frozenset({"enabled", "exempt"})
 OUTPUT_KEYS = frozenset({"keep_domains"})
 SIGNATURE_KEYS = frozenset({"name", "pattern"})
@@ -91,6 +92,55 @@ def _as_str_list(value: Any, where: str) -> List[str]:
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise ConfigError(f"{where} must be an array of strings")
     return list(value)
+
+
+def _parse_banned(value: Any) -> Tuple[Tuple[str, str, str], ...]:
+    """Validate ``[lint] banned`` into (phrase, instead, tier) triples.
+
+    WHY THESE ARE LITERAL PHRASES AND NOT REGEXES
+        ``[baseline] signatures`` takes regexes because it is a measurement
+        instrument, aimed by someone who has already decided what to count.
+        This one is aimed by someone who is simply sick of a phrase, and
+        making them escape it is a way to be wrong quietly: ``C++`` compiles
+        to a repetition error and ``(beta)`` to an empty group that matches
+        everywhere.
+
+        So the phrase is taken literally, matched case-insensitively, and the
+        gaps between its words match any run of spaces or hyphens. "load
+        bearing" therefore also catches "load-bearing", which is the whole
+        reason someone typed it.
+
+    Raises:
+        ConfigError: A malformed entry, an empty phrase, or a tier that is
+            not "error" or "warn".
+    """
+    if not isinstance(value, list):
+        raise ConfigError("[lint] banned must be an array of tables")
+    out: List[Tuple[str, str, str]] = []
+    seen: Dict[str, int] = {}
+    for i, entry in enumerate(value):
+        where = f"[lint] banned entry {i + 1}"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{where} must be a table with phrase and instead")
+        _reject_unknown(entry, BANNED_KEYS, where)
+        phrase = entry.get("phrase")
+        if not isinstance(phrase, str) or not phrase.strip():
+            raise ConfigError(f"{where} needs a non-empty string phrase")
+        instead = entry.get("instead", "")
+        if not isinstance(instead, str):
+            raise ConfigError(f"{where} ({phrase}) instead must be a string")
+        tier = entry.get("tier", "error")
+        if tier not in ("error", "warning"):
+            raise ConfigError(
+                f"{where} ({phrase}) tier must be \"error\" or \"warning\", "
+                f"not {tier!r}")
+        key = " ".join(phrase.lower().split())
+        if key in seen:
+            raise ConfigError(
+                f"{where} repeats the phrase {phrase!r} from entry {seen[key]}")
+        seen[key] = i + 1
+        out.append((phrase, instead, tier))
+    return tuple(out)
 
 
 def _parse_signatures(value: Any) -> Tuple[Tuple[str, str], ...]:
@@ -146,6 +196,8 @@ class Config:
         emdash_exempt: Optional regex whose matches are blanked before em
             dashes are counted, for a citation format that uses a lone dash
             as a separator by construction.
+        banned: (phrase, instead, tier) triples from ``[lint] banned``.
+            Your own house style, matched literally. Empty by default.
         keep_domains: Domains left in cleartext by ``redact``.
     """
 
@@ -157,6 +209,7 @@ class Config:
                  warn_tics: Sequence[str] = DEFAULT_WARN_TICS,
                  emdash_enabled: bool = False,
                  emdash_exempt: str = "",
+                 banned: Sequence[Tuple[str, str, str]] = (),
                  keep_domains: Sequence[str] = ()) -> None:
         self.transcripts = os.path.expanduser(transcripts)
         self.samples = os.path.expanduser(samples) if samples else ""
@@ -165,6 +218,7 @@ class Config:
         self.warn_tics = tuple(warn_tics)
         self.emdash_enabled = emdash_enabled
         self.emdash_exempt = emdash_exempt
+        self.banned = tuple(banned)
         self.keep_domains = tuple(keep_domains)
 
     @classmethod
@@ -223,6 +277,7 @@ class Config:
             if "warn" in lint else DEFAULT_WARN_TICS,
             emdash_enabled=enabled,
             emdash_exempt=exempt,
+            banned=_parse_banned(lint["banned"]) if "banned" in lint else (),
             keep_domains=_as_str_list(output["keep_domains"], "[output] keep_domains")
             if "keep_domains" in output else (),
         )

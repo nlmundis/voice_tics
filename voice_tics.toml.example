@@ -100,6 +100,28 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # error = ["method_defence", "not_x_but_y"]
 # warn  = ["appositive_negation"]
 
+# YOUR banned phrases. Nothing is banned by default.
+#
+# This is the one part of the linter that makes no claim about how a model
+# writes. It is you saying you do not want to read a phrase, which is a good
+# enough reason on its own and needs no ratio behind it. Kept separate from the
+# measured tiers above so a preference is never later mistaken for evidence.
+#
+# `phrase` is LITERAL, not a regex: you are banning something you are sick of,
+# not authoring a pattern, and making you escape it is a way to be wrong
+# quietly ("C++" as a regex is a repetition error). Matching is
+# case-insensitive, and the gaps between words match any run of spaces or
+# hyphens, so "load bearing" also catches "load-bearing" and "LOAD-BEARING".
+#
+# `instead` is optional and is printed with the finding. A ban with no
+# alternative is nagging; the point is to make the next sentence writable.
+# `tier` is "error" (default) or "warning".
+#
+# banned = [
+#   { phrase = "load bearing", instead = "does real work, carries weight, the rest depends on it" },
+#   { phrase = "blast radius", instead = "what it touches, how far a failure spreads" },
+# ]
+
 [lint.emdash]
 # A lone em dash outside a matched pair.
 #

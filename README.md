@@ -144,6 +144,29 @@ prose_lint --json draft.md
 Exit codes: `0` clean or warnings only, `1` any error (or any warning under
 `--strict`), `2` usage or config error.
 
+### Banning a phrase you are sick of
+
+Every rule above earned its place by measuring. This one does not, and that is
+deliberate:
+
+```toml
+[lint]
+banned = [
+  { phrase = "load bearing", instead = "does real work, carries weight" },
+  { phrase = "blast radius", instead = "what it touches", tier = "warning" },
+]
+```
+
+Nothing is banned by default. This is you saying you do not want to read a
+phrase, which needs no ratio behind it, and it is kept in its own config key
+and its own finding type so a preference is never later read back as evidence.
+
+The phrase is **literal, not a regex** — you are banning something you are
+tired of, not authoring a pattern, and making you escape it is a way to be
+wrong quietly (`C++` as a regex is a repetition error). Matching ignores case,
+and the gaps between words match any run of spaces or hyphens, so
+`load bearing` also catches `load-bearing`.
+
 A tic key that no longer exists upstream fails the **whole run** before any
 file is read, rather than the first file that reaches it. A rule that quietly
 stopped being checked is worse than a crash, because the build goes green.
@@ -187,7 +210,7 @@ make check
 ```
 
 Runs the unit suite, then `mutt_check` against it: a curated mutation gate
-that reverts each load-bearing design decision in turn and requires the tests
+that reverts each design decision the code rests on and requires the tests
 to go red. See [mutt_check](https://github.com/nlmundis/mutt_check).
 
 ## License

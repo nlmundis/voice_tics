@@ -21,6 +21,10 @@ signatures = [
 [lint]
 error = ["method_defence", "not_x_but_y"]
 warn = ["appositive_negation"]
+banned = [
+  { phrase = "load bearing", instead = "does real work, carries weight" },
+  { phrase = "blast radius", instead = "what it touches", tier = "warning" },
+]
 
 [lint.emdash]
 enabled = true

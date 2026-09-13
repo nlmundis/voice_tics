@@ -1,7 +1,7 @@
 # The curated mutation gate for voice_tics.
 #
-# Every entry reverts ONE load-bearing decision and names why the decision
-# exists. `suites` names the test class that pins it, so this file doubles as
+# Every entry reverts ONE decision the code depends on and names why that
+# decision exists. `suites` names the test class that pins it, so this file doubles as
 # a map from each decision to its test. `make check` runs it after the unit
 # suite.
 #
@@ -146,6 +146,56 @@ suites = ["tests.test_repo.RedactionTest"]
 file = "vt_redact.py"
 find = "def redact(text: str, keep_domains: Sequence[str] = ()) -> str:"
 replace = "def redact(text: str, keep_domains: Sequence[str] = (\"com\",)) -> str:"
+
+# --- banned phrases: a preference, kept out of the evidence ---------------
+
+[[mutant]]
+name = "banned_phrases_ship_non_empty"
+why = "A shipped ban list is one person's taste imposed on every reader of the tool."
+suites = ["tests.test_prose_lint.BannedPhrases"]
+file = "vt_config.py"
+find = "                 banned: Sequence[Tuple[str, str, str]] = (),"
+replace = '                 banned: Sequence[Tuple[str, str, str]] = (("load bearing", "", "error"),),'
+
+[[mutant]]
+name = "banned_phrase_treated_as_a_regex"
+why = "A phrase is typed by someone sick of it, not authored as a pattern; 'C++' as a regex is an error."
+suites = ["tests.test_prose_lint.BannedPhrases"]
+file = "prose_lint.py"
+find = '    words = [re.escape(w) for w in re.split(r"[-\s]+", phrase.strip()) if w]'
+replace = '    words = [w for w in re.split(r"[-\s]+", phrase.strip()) if w]'
+
+[[mutant]]
+name = "hyphen_and_space_are_different_phrases"
+why = "The hyphen is typesetting, not a different phrase; requiring both entries is how half a ban misses."
+suites = ["tests.test_prose_lint.BannedPhrases"]
+file = "prose_lint.py"
+find = '    body = r"[-\s]+".join(words)'
+replace = '    body = r"\s+".join(words)'
+
+[[mutant]]
+name = "banned_phrase_matches_mid_word"
+why = "'overload bearing' is not the banned phrase; without boundaries a ban fires inside longer words."
+suites = ["tests.test_prose_lint.BannedPhrases"]
+file = "prose_lint.py"
+find = '    lead = r"\b" if re.match(r"\w", phrase.strip()) else ""'
+replace = '    lead = ""'
+
+[[mutant]]
+name = "banned_phrase_counted_inside_code"
+why = "A phrase in a code sample is not the author's prose, and flagging it trains people to ignore the linter."
+suites = ["tests.test_prose_lint.BannedPhrases"]
+file = "prose_lint.py"
+find = "    prose = voice_tics.scrub(text, keep_lines=True)\n    out: List[Finding] = []\n    for phrase, instead, tier in banned:"
+replace = "    prose = text\n    out: List[Finding] = []\n    for phrase, instead, tier in banned:"
+
+[[mutant]]
+name = "duplicate_banned_phrases_silently_collapse"
+why = "Two spellings of one phrase normalise to the same key; the later would replace the earlier with no sign."
+suites = ["tests.test_prose_lint.BannedPhraseConfig"]
+file = "vt_config.py"
+find = "        if key in seen:"
+replace = "        if False:"
 
 # --- the em-dash exemption is the hole, so it stays narrow -----------------
 

@@ -256,6 +256,49 @@ def _emdash_findings(text: str, exempt: str = "") -> List[Finding]:
     ]
 
 
+def banned_pattern(phrase: str) -> Pattern[str]:
+    """A literal phrase compiled so hyphens and spaces are interchangeable.
+
+    Someone who bans "load bearing" means "load-bearing" too; the hyphen is a
+    typesetting choice, not a different phrase. Each word is escaped, so a
+    phrase containing regex punctuation is still matched literally.
+
+    Word boundaries are applied only where the phrase actually starts and ends
+    with a word character. Without that check, banning "C++" would compile to
+    a boundary that can never match after the final "+".
+    """
+    words = [re.escape(w) for w in re.split(r"[-\s]+", phrase.strip()) if w]
+    body = r"[-\s]+".join(words)
+    lead = r"\b" if re.match(r"\w", phrase.strip()) else ""
+    tail = r"\b" if re.search(r"\w$", phrase.strip()) else ""
+    return re.compile(lead + body + tail, re.IGNORECASE)
+
+
+def _banned_findings(text: str,
+                     banned: Sequence[Tuple[str, str, str]]) -> List[Finding]:
+    """Findings for the reader's own banned phrases.
+
+    Separate from the measured tics on purpose. These carry no ratio and claim
+    nothing about how a model writes; they are one person saying they do not
+    want to read a phrase, which is a perfectly good reason and a different
+    kind of claim. Keeping them apart is what stops a preference from being
+    read later as evidence.
+    """
+    prose = voice_tics.scrub(text, keep_lines=True)
+    out: List[Finding] = []
+    for phrase, instead, tier in banned:
+        why = f"banned phrase; instead: {instead}" if instead else "banned phrase"
+        for m in banned_pattern(phrase).finditer(prose):
+            out.append(Finding(
+                rule=f"banned:{' '.join(phrase.lower().split())}",
+                tier=tier,
+                line=_line_of(m.start(), prose),
+                excerpt=_excerpt(m.group(0)),
+                why=why,
+            ))
+    return out
+
+
 def _stats(text: str) -> Dict[str, float]:
     """Register numbers for the info line: reported, never a failure."""
     prose = voice_tics.scrub(text)
@@ -280,7 +323,7 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
     """
     cfg = cfg or config_mod.Config.default()
     tiers = tier_patterns(cfg.error_tics, cfg.warn_tics)
-    found = _tic_findings(text, tiers)
+    found = _tic_findings(text, tiers) + _banned_findings(text, cfg.banned)
     if cfg.emdash_enabled:
         found += _emdash_findings(text, cfg.emdash_exempt)
     found.sort(key=lambda f: (f.line is None, f.line or 0, f.rule))

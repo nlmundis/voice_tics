@@ -7,7 +7,7 @@ baseline showed that threshold detects the author's register, not the model
 (13.89 vs 13.85 words/sentence). If anyone re-adds a length gate, the
 academic-register test here goes red — that is its job, not decoration.
 
-The second load-bearing case is line numbers across a code fence. The
+The second case that carries weight is line numbers across a code fence. The
 corpus scanner's ``scrub`` collapses a multi-line fence to one space, which
 is fine for counting and fatal for a linter; ``keep_lines=True`` preserves
 geometry, and the fence tests pin both the ignored-inside-code behaviour
@@ -462,6 +462,138 @@ class Wiring(unittest.TestCase):
         self.assertFalse(config_mod.Config.default().emdash_enabled)
         found, _ = prose_lint.lint_text("We shipped it — they signed.\n")
         self.assertEqual([f.rule for f in found], [])
+
+
+class BannedPhrases(unittest.TestCase):
+    """House style: the reader's own phrases, not a claim about any model."""
+
+    def _cfg(self, *entries):
+        import vt_config as config_mod
+        return config_mod.Config(banned=entries)
+
+    BAN = ("load bearing", "does real work", "error")
+
+    def test_a_banned_phrase_is_an_error(self) -> None:
+        found, _ = prose_lint.lint_text("The lock is load bearing.\n",
+                                        self._cfg(self.BAN))
+        self.assertEqual([f.tier for f in found], ["error"])
+        self.assertIn("does real work", found[0].why)
+
+    def test_a_hyphen_and_a_space_are_the_same_phrase(self) -> None:
+        """Someone banning 'load bearing' means the hyphenated form too.
+
+        The hyphen is a typesetting choice, not a different phrase, and
+        requiring both entries is how half the bans silently miss.
+        """
+        for text in ("a load bearing wall", "a load-bearing wall",
+                     "a load  bearing wall"):
+            with self.subTest(text=text):
+                found, _ = prose_lint.lint_text(text, self._cfg(self.BAN))
+                self.assertEqual(len(found), 1, text)
+
+    def test_matching_is_case_insensitive(self) -> None:
+        found, _ = prose_lint.lint_text("LOAD-BEARING and Load-Bearing",
+                                        self._cfg(self.BAN))
+        self.assertEqual(len(found), 2)
+
+    def test_a_word_boundary_is_required_at_both_ends(self) -> None:
+        """A ban must not fire inside a longer word at either end.
+
+        Both directions are needed, and the leading one is easy to lose: in
+        "overload bearingly" the TRAILING boundary already blocks the match,
+        so that string alone cannot tell a leading boundary from none. The
+        first case below is the one that can.
+        """
+        for text in ("an overload bearing down on us",   # leading only
+                     "load bearingly odd",                # trailing only
+                     "overload bearingly"):               # both
+            with self.subTest(text=text):
+                found, _ = prose_lint.lint_text(text, self._cfg(self.BAN))
+                self.assertEqual(found, [], text)
+
+    def test_punctuation_in_a_phrase_is_literal_not_regex(self) -> None:
+        """A phrase is typed by someone sick of it, not by a regex author.
+
+        'C++' as a regex is a repetition error; taken literally it is a
+        phrase. Escaping is the tool's job, not the reader's.
+        """
+        found, _ = prose_lint.lint_text("we still write C++ here",
+                                        self._cfg(("C++", "", "error")))
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].excerpt, "C++")
+
+    def test_code_is_not_prose(self) -> None:
+        """A banned phrase inside a code sample is not the author's writing."""
+        found, _ = prose_lint.lint_text(
+            "```\nload bearing\n```\n\nUse `load-bearing` as a term.\n",
+            self._cfg(self.BAN))
+        self.assertEqual(found, [])
+
+    def test_the_tier_is_configurable(self) -> None:
+        found, _ = prose_lint.lint_text(
+            "load bearing", self._cfg(("load bearing", "x", "warning")))
+        self.assertEqual([f.tier for f in found], ["warning"])
+
+    def test_nothing_is_banned_by_default(self) -> None:
+        """A shipped ban list would be one person's taste imposed on everyone.
+
+        This is the same rule as the empty signature table and the em-dash
+        default: the repo ships measurements, and preferences are the
+        reader's to add.
+        """
+        import vt_config as config_mod
+        self.assertEqual(config_mod.Config.default().banned, ())
+        found, _ = prose_lint.lint_text("This is load-bearing.\n")
+        self.assertEqual(found, [])
+
+    def test_line_numbers_survive_a_code_fence(self) -> None:
+        text = "intro\n\n```\nx\ny\n```\n\nload bearing here\n"
+        found, _ = prose_lint.lint_text(text, self._cfg(self.BAN))
+        self.assertEqual([f.line for f in found], [8])
+
+    def test_a_banned_finding_is_named_after_its_phrase(self) -> None:
+        """So a JSON consumer can tell two bans apart, and tell them from tics."""
+        found, _ = prose_lint.lint_text("load-bearing", self._cfg(self.BAN))
+        self.assertEqual(found[0].rule, "banned:load bearing")
+
+
+class BannedPhraseConfig(unittest.TestCase):
+    """Validation of [lint] banned."""
+
+    def _parse(self, banned):
+        import vt_config as config_mod
+        return config_mod.Config.parse({"lint": {"banned": banned}})
+
+    def test_a_well_formed_entry_round_trips(self) -> None:
+        cfg = self._parse([{"phrase": "blast radius", "instead": "scope"}])
+        self.assertEqual(cfg.banned, (("blast radius", "scope", "error"),))
+
+    def test_instead_is_optional(self) -> None:
+        cfg = self._parse([{"phrase": "blast radius"}])
+        self.assertEqual(cfg.banned[0][1], "")
+
+    def test_an_empty_phrase_is_rejected(self) -> None:
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError):
+            self._parse([{"phrase": "   "}])
+
+    def test_an_unknown_tier_is_rejected(self) -> None:
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError) as ctx:
+            self._parse([{"phrase": "x", "tier": "fatal"}])
+        self.assertIn("error", str(ctx.exception))
+
+    def test_a_repeated_phrase_is_rejected(self) -> None:
+        """Differing only in spacing still collides once normalised."""
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError):
+            self._parse([{"phrase": "load bearing"},
+                         {"phrase": "Load  Bearing"}])
+
+    def test_an_unknown_key_is_rejected(self) -> None:
+        import vt_config as config_mod
+        with self.assertRaises(config_mod.ConfigError):
+            self._parse([{"phrase": "x", "replace": "y"}])
 
 
 def _tmp_cfg(text: str) -> str:
