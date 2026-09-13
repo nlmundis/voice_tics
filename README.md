@@ -98,8 +98,11 @@ are doing.
 > on both sides of the ratio: every tic divides by itself and lands near 1.0,
 > and the report says "nothing here", silently, in the direction that passes.
 > The tool counts how many constructions sit within a quarter of parity and
-> warns when most of them do, but that guard is deliberately reluctant. Narrow
-> the glob to prose you wrote unaided.
+> warns when most of them do, but that guard is deliberately reluctant, and it
+> does not see partial contamination at all: on a synthetic sweep it stayed
+> quiet up to 70% model-written paragraphs, while a tic that read 593x against
+> clean samples read 3.2x at 25% contamination. A quiet guard is not evidence
+> the samples are clean. Narrow the glob to prose you wrote unaided.
 
 ## Install
 

@@ -64,8 +64,8 @@ name = "front_matter_counted_as_prose"
 why = "YAML keys would rank as phrases and pollute every n-gram table."
 suites = ["tests.test_samples.ReadSamplesTest"]
 file = "voice_tics.py"
-find = '        if raw.startswith("---\n"):'
-replace = "        if False:"
+find = '        raw = FRONT_MATTER_RE.sub("", raw, count=1)'
+replace = "        pass"
 
 # --- the contamination guard ----------------------------------------------
 
@@ -82,8 +82,8 @@ name = "contamination_guard_fires_on_thin_data"
 why = "Four comparable structures cannot support the claim; firing there is noise that trains people to ignore it."
 suites = ["tests.test_samples.ContaminationWarningTest"]
 file = "voice_tics.py"
-find = "    if len(ratios) < 5:"
-replace = "    if len(ratios) < 0:"
+find = "    if comparable < 5:"
+replace = "    if comparable < 0:"
 
 [[mutant]]
 name = "contamination_band_is_asymmetric"
@@ -478,3 +478,77 @@ suites = ["tests.test_voice_tics.BaselineFloorTest"]
 file = "voice_tics.py"
 find = "BASELINE_FLOOR_COUNT = 0.5"
 replace = "BASELINE_FLOOR_COUNT = 1.0"
+
+# --- the sample baseline, continued ----------------------------------------
+
+[[mutant]]
+name = "front_matter_search_unbounded"
+why = "A file opening with a thematic break, or a closer with a trailing space, lost everything to the next rule, silently."
+suites = ["tests.test_samples.ReadSamplesTest"]
+file = "voice_tics.py"
+find = '    r"\A---[ \t]*\n(?:[ \t]*\S[^\n]*\n)*?(?:---|\.\.\.)[ \t]*(?:\n|\Z)")'
+replace = '    r"\A---\n.*?\n---\n", re.DOTALL)'
+
+[[mutant]]
+name = "byte_order_mark_hides_front_matter"
+why = "A BOM in front of the fence leaked every YAML key into the corpus as phrases."
+suites = ["tests.test_samples.ReadSamplesTest"]
+file = "voice_tics.py"
+find = '            with open(path, encoding="utf-8-sig") as fh:'
+replace = '            with open(path, encoding="utf-8") as fh:'
+
+[[mutant]]
+name = "samples_split_into_paragraphs_before_fences"
+why = "A code block with a blank line inside arrived in two pieces and its code was counted as the author's prose."
+suites = ["tests.test_samples.ReadSamplesTest"]
+file = "voice_tics.py"
+find = '        raw = strip_fences(raw, "", keep_lines=True)'
+replace = "        pass"
+
+[[mutant]]
+name = "model_only_structures_ignored_by_the_guard"
+why = "Left only the constructions everyone shares, so the guard fired on samples that were the author's own."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "            separated += 1"
+replace = "            pass"
+
+[[mutant]]
+name = "thin_model_only_structures_count_as_separation"
+why = "Four uses against a zero is too thin to call the corpora different."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "        elif m_count >= ONE_SIDED_MIN_COUNT and not t_count:"
+replace = "        elif m_count and not t_count:"
+
+[[mutant]]
+name = "contamination_share_raised"
+why = "At 0.99 the guard is silent on a corpus with nine of ten constructions at parity."
+suites = ["tests.test_samples.ContaminationWarningTest"]
+file = "voice_tics.py"
+find = "CONTAMINATION_SHARE = 0.66"
+replace = "CONTAMINATION_SHARE = 0.99"
+
+[[mutant]]
+name = "contamination_warning_on_a_transcript_baseline"
+why = "It would tell someone their samples were drafted by an assistant when there are no samples."
+suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
+file = "voice_tics.py"
+find = "    warning = (contamination_warning(structures, mine, theirs)\n               if samples else None)"
+replace = "    warning = contamination_warning(structures, mine, theirs)"
+
+[[mutant]]
+name = "unreadable_samples_absent_from_the_report"
+why = "Half a sample corpus failing to decode rendered as a perfectly normal run."
+suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
+file = "voice_tics.py"
+find = "        if baseline_source:\n            # The counter that makes skipping"
+replace = "        if False:\n            # The counter that makes skipping"
+
+[[mutant]]
+name = "set_aside_turns_reported_as_kept"
+why = "The report credited the transcript with turns main() discarded, overstating its contribution by 2x."
+suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
+file = "voice_tics.py"
+find = '        stats["turns"] = stats.get("turns", 0) - set_aside'
+replace = "        pass"

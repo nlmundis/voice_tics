@@ -95,6 +95,44 @@ class ReadSamplesTest(unittest.TestCase):
         self.assertEqual(len(list(vt.read_samples(str(self.tmp / "*.md")))), 2)
 
 
+    def _words(self, name: str) -> list:
+        return vt.words(" ".join(vt.read_samples(str(self.tmp / name))))
+
+    def test_a_closing_fence_with_a_trailing_space_still_closes(self) -> None:
+        """Unbounded, the search ran on to the next rule and ate the body."""
+        self._write("a.md", "---\ntitle: My post\n--- \nOpening paragraph "
+                            "of mine.\n\nSecond.\n\n---\n\nAfter the rule.\n")
+        got = self._words("a.md")
+        self.assertIn("opening", got)
+        self.assertNotIn("title", got)
+
+    def test_a_file_that_opens_with_a_thematic_break_is_kept_whole(self) -> None:
+        self._write("a.md", "---\n\nA thematic break opened this file.\n\n"
+                            "Second paragraph.\n\n---\n\nAfter the rule.\n")
+        self.assertIn("thematic", self._words("a.md"))
+
+    def test_front_matter_without_a_close_is_kept_as_text(self) -> None:
+        """No closer before the first blank line means it was never front
+        matter; dropping to the next rule is the silent loss this bounds."""
+        self._write("a.md", "---\nnot: closed\n\nMy prose here.\n\n---\n")
+        self.assertIn("prose", self._words("a.md"))
+
+    def test_front_matter_behind_a_byte_order_mark_is_stripped(self) -> None:
+        (self.tmp / "a.md").write_bytes(
+            "\ufeff---\ntags: [alpha]\n---\nBOM prose here.\n".encode("utf-8"))
+        got = self._words("a.md")
+        self.assertEqual(got, ["bom", "prose", "here"])
+
+    def test_a_code_block_with_a_blank_line_is_not_prose(self) -> None:
+        """Split into paragraphs first, neither piece held both fences."""
+        self._write("a.md", "Prose I wrote.\n\n```python\ndef compute(model):\n"
+                            "\n    return model\n```\n\nA closing sentence.\n")
+        got = self._words("a.md")
+        self.assertNotIn("def", got)
+        self.assertNotIn("return", got)
+        self.assertIn("closing", got)
+
+
 class ContaminationWarningTest(unittest.TestCase):
     """The guard must fire on a parity-heavy corpus and stay quiet otherwise."""
 
@@ -131,13 +169,10 @@ class ContaminationWarningTest(unittest.TestCase):
         structures = {f"s{i}": (100, 100) for i in range(4)}
         self.assertIsNone(vt.contamination_warning(structures, mine, theirs))
 
-    def test_one_sided_structures_are_not_comparable(self) -> None:
-        """A zero on either side is the floor correction, not the author.
-
-        Ten structures the model alone uses must not be read as ten
-        agreements; they are not comparable at all, so the guard has too
-        little data and says nothing.
-        """
+    def test_model_only_structures_are_not_agreements(self) -> None:
+        """Ten structures the model alone uses must not read as ten
+        agreements. They are evidence the corpora differ, so the guard stays
+        quiet."""
         mine, theirs = self._corpora()
         structures = {f"s{i}": (100, 0) for i in range(10)}
         self.assertIsNone(vt.contamination_warning(structures, mine, theirs))
@@ -162,6 +197,33 @@ class ContaminationWarningTest(unittest.TestCase):
         """0.8 and 1.25 are the same distance from parity, inverted."""
         low, high = vt.INDISTINGUISHABLE
         self.assertAlmostEqual(low * high, 1.0, places=6)
+
+
+    def test_model_only_structures_count_against_contamination(self) -> None:
+        """Dropping them left only the constructions everyone shares, which
+        sit at parity by nature, and the guard fired on samples that were the
+        author's own from end to end."""
+        mine, theirs = self._corpora()
+        structures = {f"shared{i}": (100, 100) for i in range(5)}
+        structures.update({f"model_only{i}": (100, 0) for i in range(5)})
+        self.assertIsNone(vt.contamination_warning(structures, mine, theirs))
+
+    def test_a_handful_of_model_only_uses_is_not_evidence(self) -> None:
+        mine, theirs = self._corpora()
+        structures = {f"shared{i}": (100, 100) for i in range(5)}
+        structures.update({f"rare{i}": (vt.ONE_SIDED_MIN_COUNT - 1, 0)
+                           for i in range(5)})
+        self.assertIsNotNone(vt.contamination_warning(structures, mine, theirs))
+
+    def test_the_share_threshold_is_two_thirds(self) -> None:
+        """Seven of ten at parity fires; six of ten does not."""
+        mine, theirs = self._corpora()
+        for near, fires in ((7, True), (6, False)):
+            structures = {f"near{i}": (100, 100) for i in range(near)}
+            structures.update({f"far{i}": (900, 100) for i in range(10 - near)})
+            with self.subTest(near=near):
+                got = vt.contamination_warning(structures, mine, theirs)
+                self.assertEqual(got is not None, fires)
 
 
 class SamplesConfigTest(unittest.TestCase):
@@ -274,6 +336,48 @@ class SampleBaselineEndToEndTest(unittest.TestCase):
                           "--baseline-from", str(self.tmp / "nothing*.md")])
         self.assertEqual(rc, 1)
         self.assertIn("no sample prose matched", err.getvalue())
+
+
+    def _text(self, extra):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = vt.main(["--glob", str(self.tmp / "*.jsonl")] + extra)
+        self.assertEqual(rc, 0)
+        return out.getvalue(), err.getvalue()
+
+    def test_the_text_report_says_how_many_samples_were_unreadable(self) -> None:
+        """Losing files shrinks the baseline and raises every ratio; the
+        counter that makes skipping safe must reach the reader."""
+        (self.tmp / "bad.md").write_bytes(b"\xff\xfe\x00 not utf-8")
+        out, _ = self._text(["--baseline-from", str(self.tmp / "*.md")])
+        self.assertIn("Samples: 1 files read, 2 paragraphs kept, "
+                      "1 unreadable and skipped.", out)
+
+    def test_turns_set_aside_for_samples_are_not_reported_as_kept(self) -> None:
+        got = self._run(["--baseline-from", str(self.tmp / "*.md")])
+        self.assertEqual(got["stats"]["turns"], got["model"]["turns"])
+        self.assertEqual(got["stats"]["turns_set_aside"], 1)
+
+    def test_a_transcript_baseline_never_gets_a_contamination_warning(self) -> None:
+        """Your turns are yours by construction; there is nothing for them
+        to be contaminated by, even when both sides write identically."""
+        import json
+        shared = ("It is really simple. Note that the tests pass. We went from "
+                  "start to finish. It serves as a guide — plainly.")
+        recs = []
+        for role in ("user", "assistant") * 5:
+            body = ({"role": "user", "content": shared} if role == "user" else
+                    {"role": "assistant", "model": "m",
+                     "content": [{"type": "text", "text": shared}]})
+            recs.append(json.dumps({"type": role, "message": body}))
+        (self.tmp / "s1.jsonl").write_text("\n".join(recs), encoding="utf-8")
+        got = self._run([])
+        comparable = sum(1 for v in got["structures"].values()
+                         if v["model"] and v["baseline"])
+        self.assertGreaterEqual(comparable, 5, "the fixture must be able to fire")
+        self.assertIsNone(got["baseline_contamination_warning"])
 
 
 if __name__ == "__main__":

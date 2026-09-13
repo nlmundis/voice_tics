@@ -648,6 +648,17 @@ def _has_text(content: object) -> bool:
 
 
 # ------------------------------------------------------------------ counting
+# YAML front matter: a "---" first line, then non-blank lines, then a closing
+# "---" or "...". The closer must come before the first blank line. Without
+# that bound, a file that merely OPENS with a thematic break, or whose closing
+# fence carries a trailing space, lost everything up to the next rule anywhere
+# in the file, silently; with it such a file is left whole, which is the safe
+# way to be wrong. Each line starts ``[ \t]*\S`` so a failed match cannot
+# backtrack through the ways of splitting a line.
+FRONT_MATTER_RE = re.compile(
+    r"\A---[ \t]*\n(?:[ \t]*\S[^\n]*\n)*?(?:---|\.\.\.)[ \t]*(?:\n|\Z)")
+
+
 def read_samples(pattern: str,
                  stats: Optional[Dict[str, int]] = None) -> Iterator[str]:
     """Scrubbed paragraphs from a glob of your own writing.
@@ -715,18 +726,21 @@ def read_samples(pattern: str,
         if not os.path.isfile(path):
             continue
         try:
-            with open(path, encoding="utf-8") as fh:
+            # utf-8-sig: a byte-order mark would otherwise sit in front of the
+            # front matter fence and hide it.
+            with open(path, encoding="utf-8-sig") as fh:
                 raw = fh.read()
         except (OSError, UnicodeDecodeError):
             counts["sample_unreadable"] = counts.get("sample_unreadable", 0) + 1
             continue
         counts["sample_files"] = counts.get("sample_files", 0) + 1
         # Front matter is metadata, not prose, and its keys would otherwise
-        # rank as phrases. Only a fence at the very start of the file counts.
-        if raw.startswith("---\n"):
-            end = raw.find("\n---\n", 3)
-            if end != -1:
-                raw = raw[end + 5:]
+        # rank as phrases. See FRONT_MATTER_RE for what counts as front matter.
+        raw = FRONT_MATTER_RE.sub("", raw, count=1)
+        # Fences go BEFORE the paragraph split. Split first, a code block
+        # with a blank line inside it arrived in two pieces, neither holding
+        # both fence lines, so its code was counted as your prose.
+        raw = strip_fences(raw, "", keep_lines=True)
         for para in re.split(r"\n\s*\n", raw):
             prose = scrub(para, gap=SCRUB_GAP)
             if words(prose):
@@ -738,6 +752,12 @@ def read_samples(pattern: str,
 # construction. Band chosen as a quarter in either direction (0.8 = 1/1.25), so
 # it is symmetric in log space rather than arithmetically lopsided.
 INDISTINGUISHABLE = (0.8, 1.25)
+
+# A structure the model uses at least this often while the baseline never uses
+# it counts as evidence the corpora DIFFER. Fewer uses than this against a zero
+# is too thin to say anything, the same floor ``--min-count`` applies to
+# phrases.
+ONE_SIDED_MIN_COUNT = DEFAULT_MIN_COUNT
 
 # Fraction of comparable structures inside that band above which a sample
 # baseline is reported as suspect. Set high on purpose: an author who genuinely
@@ -765,6 +785,15 @@ def contamination_warning(structures: Dict[str, Tuple[int, int]],
         measured, so this warns rather than fails, and the threshold below is
         deliberately reluctant.
 
+    WHAT IT DOES NOT CATCH: PARTIAL CONTAMINATION
+        Dilution moves every ratio smoothly toward 1.0, and this only notices
+        once most constructions are inside the band. On a synthetic sweep
+        (2026-09-13) it stayed quiet up to 70% model-written paragraphs and
+        fired from 78%, while a tic that read 593x against clean samples read
+        3.2x at 25% contamination and 1.3x at 70%, in silence both times. So
+        a quiet guard is not evidence the samples are clean; only knowing
+        where the samples came from is.
+
     WHY A COUNT AND NOT A CLASSIFIER
         Detecting "was this written by a model" per document is the thing this
         whole repo argues cannot be done by wordlist and should not be done by
@@ -783,21 +812,31 @@ def contamination_warning(structures: Dict[str, Tuple[int, int]],
         when there is too little data to say.
     """
     ratios = []
+    separated = 0
     for m_count, t_count in structures.values():
-        # Only constructions BOTH corpora actually use can be compared; a
-        # zero on either side is the floor correction talking, not the author.
+        # Constructions BOTH corpora use are compared by ratio. One the model
+        # uses and the baseline never does is not a ratio (a zero there is
+        # the floor correction talking) but it is not silence either: it is
+        # the strongest evidence the baseline holds no model prose. Dropping
+        # it, as this once did, left only the constructions humans and models
+        # genuinely share, which sit near parity by nature, so the guard fired
+        # on corpora that were entirely the author's own. A construction only
+        # the BASELINE uses says nothing about contamination and is skipped.
         if m_count and t_count:
             m_rate, t_rate = mine.rate(m_count), theirs.rate(t_count)
             if t_rate:
                 ratios.append(m_rate / t_rate)
-    if len(ratios) < 5:
+        elif m_count >= ONE_SIDED_MIN_COUNT and not t_count:
+            separated += 1
+    comparable = len(ratios) + separated
+    if comparable < 5:
         return None
     low, high = INDISTINGUISHABLE
     near = sum(1 for r in ratios if low <= r <= high)
-    share = near / len(ratios)
+    share = near / comparable
     if share < CONTAMINATION_SHARE:
         return None
-    return (f"WARNING: {near} of {len(ratios)} comparable structures sit "
+    return (f"WARNING: {near} of {comparable} comparable structures sit "
             f"within a quarter of parity.\n"
             "That is what a baseline containing model-written prose looks "
             "like. If any\n"
@@ -1263,9 +1302,20 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
         out.append("connectives are over-represented by construction. Ratios")
         out.append("rank candidates; they do not convict.")
     if stats:
+        set_aside = stats.get("turns_set_aside", 0)
         out.append(f"Corpus: {stats.get('sessions', 0):,} sessions read, "
                    f"{stats.get('automated_sessions', 0):,} dropped as "
-                   f"scheduled runs, {stats.get('turns', 0):,} turns kept.")
+                   f"scheduled runs, {stats.get('turns', 0):,} turns kept"
+                   + (f", {set_aside:,} of your turns set aside for the "
+                      "sample baseline." if set_aside else "."))
+        if baseline_source:
+            # The counter that makes skipping an unreadable sample safe has
+            # to reach the reader: losing files shrinks the baseline and
+            # raises every ratio, and nothing else in the report shows it.
+            out.append(f"Samples: {stats.get('sample_files', 0):,} files read, "
+                       f"{stats.get('sample_paragraphs', 0):,} paragraphs "
+                       f"kept, {stats.get('sample_unreadable', 0):,} "
+                       "unreadable and skipped.")
         out.append(f"Excluded records: {stats.get('meta_records', 0):,} "
                    f"harness-composed (isMeta), "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
@@ -1402,6 +1452,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # the two of you.
     sigs: Dict[str, List[int]] = {n: [0, 0] for n, _ in cfg.signatures}
     stats: Dict[str, int] = {}
+    set_aside = 0
     for turn in read_turns(paths, since=since, stats=stats, model=a.model):
         is_model = turn.role == "assistant"
         # With a sample baseline the user turns are dropped entirely rather
@@ -1409,6 +1460,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # neither register and silently weight it by whichever side happened
         # to be larger, which is a number nobody could interpret.
         if not is_model and samples:
+            set_aside += 1
             continue
         (model if is_model else baseline).add(turn.text, opens=turn.opens)
         idx = 0 if is_model else 1
@@ -1416,6 +1468,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             struct[name][idx] += count
         for name, count in signature_counts(turn.text, cfg.signatures).items():
             sigs[name][1 if is_model else 0] += count
+    if set_aside:
+        # "turns" then counts only turns that reached a corpus, so the report
+        # does not credit the transcript with turns main() discarded.
+        stats["turns"] = stats.get("turns", 0) - set_aside
+        stats["turns_set_aside"] = set_aside
     if samples:
         for para in read_samples(samples, stats=stats):
             baseline.add(para)
