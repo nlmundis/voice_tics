@@ -174,6 +174,21 @@ class UserTextTest(unittest.TestCase):
         self.assertIsNone(vt._user_text(None))
 
 
+    def test_a_system_reminder_is_cut_out_and_the_prompt_kept(self) -> None:
+        """The harness appends reminders to the record holding the prompt, so
+        dropping the whole record deleted what was typed beside it."""
+        got = vt._user_text("Please rewrite the intro; it reads like a "
+                            "brochure.\n<system-reminder>Contents of a "
+                            "config file</system-reminder>")
+        self.assertIsNotNone(got)
+        self.assertIn("rewrite the intro", got)
+        self.assertNotIn("config file", got)
+
+    def test_an_unclosed_system_reminder_still_drops_the_record(self) -> None:
+        self.assertIsNone(vt._user_text("typed words <system-reminder>and "
+                                        "the rest of it"))
+
+
 class AssistantTextTest(unittest.TestCase):
     """Only prose the model composed may enter its corpus."""
 
@@ -195,6 +210,24 @@ class AssistantTextTest(unittest.TestCase):
         blocks = [{"type": "text",
                    "text": "You've hit your usage limit. Resets at 3pm."}]
         self.assertIsNone(vt._assistant_text(blocks))
+
+
+    def test_the_model_writing_about_rate_limits_is_voice(self) -> None:
+        """A notice is the whole record, so markers match only at its start;
+        as substrings they deleted the model's own explanations."""
+        for prose in ("The client waits out 429 rate limits before retrying.",
+                      "That table row quotes an API Error: 529 verbatim.",
+                      "Earlier you've hit your quota twice this week."):
+            with self.subTest(prose=prose):
+                self.assertEqual(vt._assistant_text(
+                    [{"type": "text", "text": prose}]), prose)
+
+    def test_notices_that_open_the_record_are_still_dropped(self) -> None:
+        for notice in ("API Error: 529 overloaded", "No response requested.",
+                       "  [Request interrupted by user]"):
+            with self.subTest(notice=notice):
+                self.assertIsNone(vt._assistant_text(
+                    [{"type": "text", "text": notice}]))
 
 
 class ReadTurnsTest(unittest.TestCase):
@@ -358,6 +391,85 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(got.stdout.strip(), "1", got.stderr)
 
 
+    def _stats(self, lines: List[str], **kwargs: Any) -> Dict[str, int]:
+        stats: Dict[str, int] = {}
+        path = _session(lines, self.tmp)
+        self.turns = list(vt.read_turns([path], stats=stats, **kwargs))
+        return stats
+
+    def test_a_marker_behind_a_system_reminder_still_drops_the_session(self) -> None:
+        stats = self._stats([
+            _rec("user", "<system-reminder>hook output</system-reminder>\n"
+                         "This is a scheduled task. Do the thing."),
+            _rec("assistant", "Alpha beta gamma delta."),
+        ])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("automated_sessions"), 1)
+
+    def test_a_days_cutoff_after_the_marker_still_drops_the_session(self) -> None:
+        """--days used to skip the marker record as too old and then keep the
+        rest of the scheduled run, reporting nothing dropped."""
+        stats = self._stats([
+            _rec("user", "This is a scheduled task. Do the thing.",
+                 ts="2026-01-01T10:00:00Z"),
+            _rec("assistant", "Alpha beta gamma delta.",
+                 ts="2026-01-03T10:00:00Z"),
+        ], since=dt.datetime(2026, 1, 2, tzinfo=dt.timezone.utc))
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("automated_sessions"), 1)
+
+    def test_every_meta_record_dropped_is_counted(self) -> None:
+        stats = self._stats([
+            _rec("user", "<command-name>/x</command-name> expansion", meta=True),
+            _rec("user", "a plain expansion", meta=True),
+        ])
+        self.assertEqual(stats.get("meta_records"), 2)
+
+    def test_a_dropped_notice_is_counted(self) -> None:
+        stats = self._stats([_rec("assistant", "API Error: 500", model="m")])
+        self.assertEqual(stats.get("noise_records"), 1)
+
+    def test_a_timestamp_without_an_offset_is_utc_not_a_crash(self) -> None:
+        stats = self._stats(
+            [_rec("assistant", "Alpha beta.", ts="2026-01-03T10:00:00")],
+            since=dt.datetime(2026, 1, 2, tzinfo=dt.timezone.utc))
+        self.assertEqual(stats.get("turns"), 1)
+        self.assertEqual(self.turns[0].when.tzinfo, dt.timezone.utc)
+
+    def test_a_non_object_message_costs_one_record_not_the_scan(self) -> None:
+        bad = _session([json.dumps({"type": "assistant", "message": "oops"}),
+                        json.dumps({"type": "user", "message": ["x"]})],
+                       self.tmp, "bad.jsonl")
+        good = _session([_rec("assistant", "Alpha beta.")], self.tmp, "good.jsonl")
+        self.assertEqual(len(list(vt.read_turns([bad, good]))), 1)
+
+    def test_an_undecodable_byte_costs_one_line_not_the_scan(self) -> None:
+        path = self.tmp / "bytes.jsonl"
+        path.write_bytes(b'{"type": "user", "message": {"content": "caf\xe9"}}\n'
+                         + _rec("assistant", "Alpha beta.").encode() + b"\n")
+        self.assertEqual([t.role for t in vt.read_turns([str(path)])],
+                         ["user", "assistant"])
+
+    def test_only_the_first_record_of_a_response_opens_it(self) -> None:
+        """A response that calls a tool is several assistant records; the
+        continuation after the tool result opens nothing."""
+        tool_use = [{"type": "text", "text": "Let me read the parser."},
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]
+        result = [{"type": "tool_result", "tool_use_id": "t1", "content": "x"}]
+        self._stats([
+            _rec("user", "fix the parser"),
+            _rec("assistant", "", blocks=tool_use),
+            _rec("user", "", blocks=result),
+            _rec("assistant", "The bug is on line twelve."),
+            _rec("user", "thanks"),
+            _rec("assistant", "Glad it helped."),
+        ])
+        self.assertEqual([(t.role, t.opens) for t in self.turns],
+                         [("user", True), ("assistant", True),
+                          ("assistant", False), ("user", True),
+                          ("assistant", True)])
+
+
 class NgramTest(unittest.TestCase):
     """Phrase ranking mechanics."""
 
@@ -427,6 +539,36 @@ class NgramTest(unittest.TestCase):
         self.assertTrue(vt.rank_phrases(mine, theirs, min_count=2, top=20))
 
 
+    def test_a_string_longer_than_the_widest_ngram_reports_once(self) -> None:
+        """Its widest windows are siblings, not containers, so containment
+        alone kept every one and a second habit fell off the top rows."""
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        for _ in range(10):
+            mine.add("Alpha bravo charlie delta echo foxtrot golf hotel india juliet.")
+            mine.add("Quebec romeo sierra.")
+        for i in range(40):
+            theirs.add(f"unrelated words number {i}")
+        top = [f.phrase for f in vt.rank_phrases(mine, theirs, 5, 5)]
+        self.assertEqual(top, ["alpha bravo charlie delta echo foxtrot",
+                               "quebec romeo sierra"])
+
+    def test_no_ngram_crosses_a_sentence_or_a_scrubbed_span(self) -> None:
+        corpus = vt.Corpus("m")
+        corpus.add(vt.scrub("The test passed.\nRead the file next.",
+                            gap=vt.SCRUB_GAP))
+        corpus.add(vt.scrub("Run `git status` then look.", gap=vt.SCRUB_GAP))
+        self.assertNotIn(("passed", "read"), corpus.grams[2])
+        self.assertNotIn(("run", "then"), corpus.grams[2])
+        self.assertIn(("then", "look"), corpus.grams[2])
+        self.assertEqual(corpus.total_words, 10)
+
+    def test_the_gap_is_invisible_to_the_structure_detectors(self) -> None:
+        """Counts must not move because a removed span is marked differently."""
+        text = "It's not the code `x`, it's the config https://e.io and more."
+        self.assertEqual(vt.structure_counts(vt.scrub(text)),
+                         vt.structure_counts(vt.scrub(text, gap=vt.SCRUB_GAP)))
+
+
 class CorpusTest(unittest.TestCase):
     """Rates and openers."""
 
@@ -444,6 +586,13 @@ class CorpusTest(unittest.TestCase):
         c = vt.Corpus("x")
         c.add("Let me check the file. Then something else.")
         self.assertEqual(c.openers.most_common(1)[0][0], "let me check")
+
+
+    def test_a_continuation_counts_words_but_opens_nothing(self) -> None:
+        corpus = vt.Corpus("m")
+        corpus.add("The bug is on line twelve.", opens=False)
+        self.assertEqual(sum(corpus.openers.values()), 0)
+        self.assertEqual(corpus.total_words, 6)
 
 
 class FenceScanTest(unittest.TestCase):
@@ -673,6 +822,29 @@ class PatternTest(unittest.TestCase):
                          {"alpha", "beta"})
 
 
+
+class BaselineFloorTest(unittest.TestCase):
+    """The continuity floor keeps a never-used phrase finite AND ranked."""
+
+    def _structure_ratio(self, baseline_count: int) -> float:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        mine.total_words = theirs.total_words = 10000
+        structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        structures["not_x_but_y"] = (10, baseline_count)
+        report = vt.render(mine, theirs, [], structures, 0, False)
+        row = next(line for line in report.splitlines()
+                   if line.rstrip().endswith(" not_x_but_y"))
+        return float(row.split("x")[0])
+
+    def test_a_structure_the_baseline_never_uses_is_not_zero(self) -> None:
+        """Without the floor the strongest possible tic printed 0.0x."""
+        self.assertEqual(self._structure_ratio(0), 20.0)
+
+    def test_never_said_ranks_above_said_once(self) -> None:
+        """The reason for half the smallest count rather than one of it."""
+        self.assertGreater(self._structure_ratio(0), self._structure_ratio(1))
+
+
 class SourceTextRedactionTest(unittest.TestCase):
     """Every source-text string that prints goes through ``redact``.
 
@@ -889,6 +1061,19 @@ class MainTest(unittest.TestCase):
         with contextlib.redirect_stderr(err):
             rc = vt.main(["--glob", str(self.tmp / "none-*.jsonl")])
         self.assertEqual(rc, 1)
+
+
+    def test_a_recursive_transcript_glob_reads_every_level(self) -> None:
+        import io
+        import contextlib
+        deep = self.tmp / "nested" / "deeper"
+        deep.mkdir(parents=True)
+        _session([_rec("assistant", "Deep words here.")], deep, "d.jsonl")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = vt.main(["--glob", str(self.tmp / "**" / "*.jsonl"), "--json"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(buf.getvalue())["stats"]["sessions"], 2)
 
 
 if __name__ == "__main__":

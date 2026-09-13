@@ -168,6 +168,13 @@ SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # Harness furniture that appears inside user records but was never typed by
 # you. Counting it as your prose would poison the baseline with the model's
 # own vocabulary, since several of these are written by hooks.
+#
+# A system reminder is the exception to dropping the whole record: the harness
+# APPENDS it to the record holding what you typed, so it is cut out and the
+# rest kept (see ``_user_text``). The markers below mean the record as a whole
+# is harness output.
+SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>",
+                                re.DOTALL)
 USER_NOISE_MARKERS = (
     "<system-reminder>",
     "<local-command-caveat>",
@@ -205,15 +212,31 @@ AUTOMATED_SESSION_MARKERS = (
 # second in the opener table; it is the harness's rate-limit notice. A usage
 # notice counted as voice is the same class of error as counting a hook's
 # output as your prose, and it is why both sides get a filter.
+#
+# A marker matches only at the START of the record, because a harness notice
+# is the whole record. As substrings anywhere, "rate limit" and "API Error"
+# deleted the model's own explanations of rate limiting, and "rate limit" is
+# gone altogether: no notice opens with it. Measured on the reference corpus
+# (554 transcripts, 2026-09-13): of 194 assistant records the substring
+# markers matched, 174 were ``<synthetic>`` notices, which the synthetic
+# filter drops first anyway, and 18 of the remaining 20 were the model's own
+# prose with the marker mid-text.
 ASSISTANT_NOISE_MARKERS = (
     "you've hit your",
     "You've hit your",
     "No response requested",
     "Claude usage limit reached",
-    "rate limit",
     "[Request interrupted",
     "API Error",
 )
+
+# Stands in for a span ``scrub`` removed (code, a URL, a path, a tag) when the
+# text is headed for the n-gram tables. It is whitespace to every regex, so
+# the structure detectors and the sentence splitter see exactly what a space
+# would give them, but it is not a space, so ``Corpus.add`` can refuse to
+# build an n-gram across it. U+2029 PARAGRAPH SEPARATOR: never typed, and not
+# a newline, so line-based passes are unaffected.
+SCRUB_GAP = "\u2029"
 
 # YOUR OWN signature phrases, checked by name rather than discovered, and
 # therefore empty until you fill in ``[baseline] signatures`` in
@@ -312,7 +335,7 @@ def strip_fences(text: str, repl: str = " ", keep_lines: bool = False) -> str:
     return "".join(out)
 
 
-def scrub(text: str, keep_lines: bool = False) -> str:
+def scrub(text: str, keep_lines: bool = False, gap: str = " ") -> str:
     """Strip everything that is not authored prose.
 
     Removes code, URLs, paths, markdown link targets and markdown layout marks,
@@ -332,6 +355,9 @@ def scrub(text: str, keep_lines: bool = False) -> str:
             blank-line-preceded heading on real markdown; link and wikilink
             passes are single-line by design, see MD_LINK_RE). Corpus
             counting does not care about geometry, hence the default.
+        gap: What replaces a removed span. The corpus readers pass
+            ``SCRUB_GAP`` so no n-gram joins the words either side of
+            deleted code; everything else keeps a space.
     """
 
     def _keep(repl: str):
@@ -342,13 +368,13 @@ def scrub(text: str, keep_lines: bool = False) -> str:
         return f
 
     passes: Tuple[Tuple[re.Pattern[str], str], ...] = (
-        (INLINE_CODE_RE, " "),
+        (INLINE_CODE_RE, gap),
         (MD_LINK_RE, r"\1"),
         (WIKILINK_RE, r"\1"),
-        (URL_RE, " "),
-        (PATH_RE, " "),
-        (HTML_TAG_RE, " "),
-        (TABLE_ROW_RE, " "),
+        (URL_RE, gap),
+        (PATH_RE, gap),
+        (HTML_TAG_RE, gap),
+        (TABLE_ROW_RE, gap),
         (HEADING_RE, ""),
         (LIST_BULLET_RE, ""),
         (BLOCKQUOTE_RE, ""),
@@ -357,7 +383,7 @@ def scrub(text: str, keep_lines: bool = False) -> str:
     text = text.translate(SMART_PUNCT)
     # The fence pass runs first and separately: it is the only one that must
     # cross line boundaries, and the only one with a quadratic regex.
-    text = strip_fences(text, " ", keep_lines)
+    text = strip_fences(text, gap, keep_lines)
     for rx, repl in passes:
         text = rx.sub(_keep(repl) if keep_lines else repl, text)
     return text
@@ -391,6 +417,10 @@ class Turn:
     when: Optional[dt.datetime]
     text: str
     session: str
+    # Whether this record begins a response. A response that calls a tool is
+    # stored as several assistant records, and only the first one after
+    # something you sent is an opening; the rest continue after a tool result.
+    opens: bool = True
 
 
 def _user_text(content: object) -> Optional[str]:
@@ -402,6 +432,12 @@ def _user_text(content: object) -> Optional[str]:
     merely skipped: the text blocks beside it are a caption you typed,
     and dropping the whole record silently lost that prose from your baseline
     (16 such records in the live corpus when this was measured).
+
+    System reminders get the same treatment for the same reason: the harness
+    appends them to the record that holds your prompt, so each closed
+    ``<system-reminder>`` span is cut out and what remains is judged on its
+    own. An unclosed one still drops the record, because the rest of it cannot
+    be told apart from the reminder.
     """
     if isinstance(content, str):
         raw = content
@@ -417,11 +453,18 @@ def _user_text(content: object) -> Optional[str]:
         raw = "\n".join(parts)
     else:
         return None
+    raw = SYSTEM_REMINDER_RE.sub("\n", raw)
     if not raw.strip():
         return None
     if any(marker in raw for marker in USER_NOISE_MARKERS):
         return None
     return raw
+
+
+def _is_tool_result(content: object) -> bool:
+    """Whether a user record is a tool round-trip rather than something sent."""
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
 
 
 def _assistant_text(content: object) -> Optional[str]:
@@ -438,20 +481,27 @@ def _assistant_text(content: object) -> Optional[str]:
     raw = "\n".join(parts)
     if not raw.strip():
         return None
-    if any(marker in raw for marker in ASSISTANT_NOISE_MARKERS):
+    if raw.lstrip().startswith(ASSISTANT_NOISE_MARKERS):
         return None
     return raw
 
 
 def _parse_when(rec: dict) -> Optional[dt.datetime]:
-    """The record timestamp as an aware datetime, or None if unparseable."""
+    """The record timestamp as an aware datetime, or None if unparseable.
+
+    A timestamp with no UTC offset is read as UTC, which is what the harness
+    writes. Left naive, it could not be compared with the aware ``since``
+    cutoff, and one such record aborted the whole scan, but only under
+    ``--days``.
+    """
     ts = rec.get("timestamp")
     if not isinstance(ts, str):
         return None
     try:
-        return dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        when = dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
 
 
 def read_turns(paths: Sequence[str],
@@ -475,8 +525,8 @@ def read_turns(paths: Sequence[str],
         stats: Optional counter dict, updated in place with
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``synthetic_records``/
-            ``model_filtered``) so the caller can report what was excluded
-            instead of excluding it silently.
+            ``model_filtered``/``noise_records``) so the caller can report
+            what was excluded instead of excluding it silently.
         model: Substring an assistant record's ``message.model`` must contain,
             or None for all models. Without it every figure downstream is a
             blend across every model that ever wrote a transcript here, not
@@ -490,6 +540,9 @@ def read_turns(paths: Sequence[str],
         session = os.path.basename(path)[:8]
         buffered: List[Turn] = []
         automated = False
+        # True until the first assistant prose after something you sent, so
+        # the opener table counts responses rather than records.
+        opens = True
         try:
             fh = open(path, encoding="utf-8", errors="replace")
         except OSError:
@@ -505,6 +558,7 @@ def read_turns(paths: Sequence[str],
                 # AttributeError, losing every session after the bad line --
                 # a scan that silently reports fewer sessions is worse than one
                 # that reports none, so this is a guard rather than a try.
+                # The same holds one level down, for ``message``.
                 if not isinstance(rec, dict):
                     continue
                 kind = rec.get("type")
@@ -512,45 +566,62 @@ def read_turns(paths: Sequence[str],
                     continue
                 if rec.get("isSidechain"):
                     continue
+                message = rec.get("message")
+                if not isinstance(message, dict):
+                    message = {}
+                content = message.get("content")
                 if kind == "assistant":
-                    rec_model = (rec.get("message") or {}).get("model") or ""
+                    rec_model = message.get("model") or ""
+                    if not isinstance(rec_model, str):
+                        rec_model = ""
                     if rec_model == "<synthetic>":
-                        if stats is not None:
-                            stats["synthetic_records"] = (
-                                stats.get("synthetic_records", 0) + 1)
+                        _count(stats, "synthetic_records")
                         continue
                     if model is not None and model not in rec_model:
-                        if stats is not None:
-                            stats["model_filtered"] = (
-                                stats.get("model_filtered", 0) + 1)
+                        _count(stats, "model_filtered")
+                        continue
+                    text = _assistant_text(content)
+                    if text is None and _has_text(content):
+                        _count(stats, "noise_records")
+                else:
+                    if not _is_tool_result(content):
+                        opens = True
+                    text = _user_text(content)
+                    # The session test runs BEFORE the date cutoff and before
+                    # isMeta, so neither can hide the one record that marks a
+                    # scheduled run: a --days cutoff falling after the prompt
+                    # re-admitted the rest of that session, and the report
+                    # then said nothing had been dropped.
+                    if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
+                        automated = True
+                        break
+                    # isMeta marks a user record the harness composed rather
+                    # than you: slash-command expansions and similar. It is
+                    # the single largest contaminant found so far -- 55% of
+                    # your baseline by word count (120,755 words down to
+                    # 54,688) -- and it compressed every ratio toward 1
+                    # because so much of "his" corpus was machine text.
+                    # Dropping it changed appositive_negation from 1.1x to
+                    # 2.4x, which is the difference between contradicting
+                    # your own observation about your writing and confirming
+                    # it. Counted before the noise filter, so every isMeta
+                    # record dropped is a record reported.
+                    if rec.get("isMeta"):
+                        _count(stats, "meta_records")
                         continue
                 when = _parse_when(rec)
                 if since is not None and when is not None and when < since:
+                    if kind == "assistant" and text:
+                        opens = False
                     continue
-                content = (rec.get("message") or {}).get("content")
-                text = (_assistant_text(content) if kind == "assistant"
-                        else _user_text(content))
                 if not text:
                     continue
-                if kind == "user" and any(m in text
-                                          for m in AUTOMATED_SESSION_MARKERS):
-                    automated = True
-                    break
-                # isMeta marks a user record the harness composed rather than
-                # you: slash-command expansions and similar. It is the
-                # single largest contaminant found so far -- 55% of your
-                # baseline by word count (120,755 words down to 54,688) --
-                # and it compressed every ratio toward 1 because so much of
-                # "his" corpus was machine text. Dropping it changed
-                # appositive_negation from 1.1x to 2.4x, which is the
-                # difference between contradicting your own observation
-                # about your writing and confirming it.
-                if kind == "user" and rec.get("isMeta"):
-                    if stats is not None:
-                        stats["meta_records"] = stats.get("meta_records", 0) + 1
-                    continue
-                buffered.append(Turn(role=kind, when=when, text=scrub(text),
-                                     session=session))
+                turn_opens = opens if kind == "assistant" else True
+                if kind == "assistant":
+                    opens = False
+                buffered.append(Turn(role=kind, when=when,
+                                     text=scrub(text, gap=SCRUB_GAP),
+                                     session=session, opens=turn_opens))
         if stats is not None:
             stats["sessions"] = stats.get("sessions", 0) + 1
             if automated:
@@ -561,6 +632,19 @@ def read_turns(paths: Sequence[str],
         if stats is not None:
             stats["turns"] = stats.get("turns", 0) + len(buffered)
         yield from buffered
+
+
+def _count(stats: Optional[Dict[str, int]], key: str) -> None:
+    """Add one to ``stats[key]`` when the caller asked for counters."""
+    if stats is not None:
+        stats[key] = stats.get(key, 0) + 1
+
+
+def _has_text(content: object) -> bool:
+    """Whether an assistant record carries any non-blank text block."""
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "text"
+        and str(b.get("text") or "").strip() for b in content)
 
 
 # ------------------------------------------------------------------ counting
@@ -644,7 +728,7 @@ def read_samples(pattern: str,
             if end != -1:
                 raw = raw[end + 5:]
         for para in re.split(r"\n\s*\n", raw):
-            prose = scrub(para)
+            prose = scrub(para, gap=SCRUB_GAP)
             if words(prose):
                 counts["sample_paragraphs"] = counts.get("sample_paragraphs", 0) + 1
                 yield prose
@@ -746,18 +830,35 @@ class Corpus:
         default_factory=collections.Counter)
     sentence_lengths: List[int] = dataclasses.field(default_factory=list)
 
-    def add(self, text: str) -> None:
-        """Fold one turn's prose into the tables."""
+    def add(self, text: str, opens: bool = True) -> None:
+        """Fold one turn's prose into the tables.
+
+        N-grams are taken within one sentence and within one run of text
+        ``scrub`` left intact (split at ``SCRUB_GAP``). Taken over the whole
+        turn's token stream, the table ranked strings nobody wrote: the last
+        words of one sentence welded to the first of the next, and the words
+        either side of a deleted code span. Both effects grow with turn
+        length and code density, which are far higher on the model's side,
+        so the phantom grams landed in the ratio's numerator.
+
+        Args:
+            text: Scrubbed prose of one turn, paragraph or record.
+            opens: Whether this text begins a response. Only then does its
+                first sentence count toward the opener table; a record that
+                continues a response after a tool result opens nothing.
+        """
         self.turns += 1
         sents = sentences(text)
         self.total_sentences += len(sents)
         for s in sents:
             self.sentence_lengths.append(len(words(s)))
-        toks = words(text)
-        self.total_words += len(toks)
-        for width in NGRAM_WIDTHS:
-            self.grams[width].update(ngrams(toks, width))
-        if sents:
+        self.total_words += len(words(text))
+        for s in sents:
+            for run in s.split(SCRUB_GAP):
+                toks = words(run)
+                for width in NGRAM_WIDTHS:
+                    self.grams[width].update(ngrams(toks, width))
+        if sents and opens:
             first = words(sents[0])[:3]
             if first:
                 self.openers[" ".join(first)] += 1
@@ -1072,6 +1173,16 @@ def _drop_subsumed(found: Sequence[Finding]) -> List[Finding]:
     triple-count it and push genuinely separate tics off the report.
     """
     kept: List[Finding] = []
+    # Widest-width findings already seen, kept or absorbed; a narrower window
+    # of an absorbed one is contained in the same string. A repeated string
+    # longer than the widest n-gram has no single row that contains it: its
+    # widest windows are siblings, each shifted one token along, and
+    # containment alone kept every one, so one sentence filled as many rows
+    # as it had words and pushed distinct tics off the report. A widest
+    # window that overlaps a seen one by all but one token, at a comparable
+    # count, is that same string continuing.
+    widest: List[Finding] = []
+    top = max(NGRAM_WIDTHS)
     for f in found:
         # Containment is judged on whole tokens, so both sides are padded
         # with spaces. Raw substring matching dropped "own the" as
@@ -1079,10 +1190,22 @@ def _drop_subsumed(found: Sequence[Finding]) -> List[Finding]:
         # was invisible because the dropped row simply never printed.
         padded = f" {f.phrase} "
         if any(padded in f" {k.phrase} " and f.mine <= k.mine * 1.35
-               for k in kept):
+               for k in kept + widest):
             continue
+        if f.width == top:
+            toks = f.phrase.split()
+            if any(_shifted_by_one(toks, w.phrase.split())
+                   and f.mine <= w.mine * 1.35 for w in widest):
+                widest.append(f)
+                continue
+            widest.append(f)
         kept.append(f)
     return kept
+
+
+def _shifted_by_one(a: Sequence[str], b: Sequence[str]) -> bool:
+    """Whether two equal-length token windows overlap in all but one token."""
+    return list(a[1:]) == list(b[:-1]) or list(a[:-1]) == list(b[1:])
 
 
 # -------------------------------------------------------------------- report
@@ -1146,6 +1269,7 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
         out.append(f"Excluded records: {stats.get('meta_records', 0):,} "
                    f"harness-composed (isMeta), "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
+                   f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('model_filtered', 0):,} other-model.")
     out.append("")
 
@@ -1198,7 +1322,7 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
         out.append("")
 
     out.append("-" * 78)
-    out.append(f"OPENERS — first three words of a turn, {speaker} only")
+    out.append(f"OPENERS — first three words of a response, {speaker} only")
     out.append("-" * 78)
     total = sum(mine.openers.values()) or 1
     if show_source_text:
@@ -1263,7 +1387,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         since = (dt.datetime.now(dt.timezone.utc)
                  - dt.timedelta(days=a.days))
 
-    paths = sorted(glob.glob(os.path.expanduser(pattern)))
+    # Recursive like the samples glob, so a ``**`` pattern means what it says
+    # instead of silently reading one level and reporting success.
+    paths = sorted(p for p in glob.glob(os.path.expanduser(pattern),
+                                        recursive=True) if os.path.isfile(p))
     if not paths:
         print(f"no transcripts matched {pattern}", file=sys.stderr)
         return 1
@@ -1283,7 +1410,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # to be larger, which is a number nobody could interpret.
         if not is_model and samples:
             continue
-        (model if is_model else baseline).add(turn.text)
+        (model if is_model else baseline).add(turn.text, opens=turn.opens)
         idx = 0 if is_model else 1
         for name, count in structure_counts(turn.text).items():
             struct[name][idx] += count

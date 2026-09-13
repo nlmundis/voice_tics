@@ -348,3 +348,133 @@ suites = ["tests.test_voice_tics.SourceTextRedactionTest"]
 file = "voice_tics.py"
 find = "            doc[\"openers\"] = [(redact(o, cfg.keep_domains), c) for o, c"
 replace = "            doc[\"openers\"] = [(o, c) for o, c"
+
+# --- reading transcripts: nothing dropped silently, nothing kept wrongly ---
+
+[[mutant]]
+name = "system_reminder_drops_the_typed_prompt"
+why = "The harness appends reminders to the record holding the prompt; a whole-record drop deleted real baseline prose and hid scheduled-run markers."
+suites = ["tests.test_voice_tics.UserTextTest", "tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '    raw = SYSTEM_REMINDER_RE.sub("\n", raw)'
+replace = "    pass"
+
+[[mutant]]
+name = "date_cutoff_runs_before_the_scheduled_run_test"
+why = "--days skipped the marker record as too old and re-admitted the rest of the scheduled run, reporting nothing dropped."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                message = rec.get(\"message\")\n                if not isinstance(message, dict):"
+replace = "                if since is not None and _parse_when(rec) is not None and _parse_when(rec) < since:\n                    continue\n                message = rec.get(\"message\")\n                if not isinstance(message, dict):"
+
+[[mutant]]
+name = "meta_records_counted_after_the_noise_filter"
+why = "An isMeta record carrying harness markup was excluded and attributed to nothing, understating the reported exclusion."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if rec.get(\"isMeta\"):\n                        _count(stats, \"meta_records\")"
+replace = "                    if not text:\n                        continue\n                    if rec.get(\"isMeta\"):\n                        _count(stats, \"meta_records\")"
+
+[[mutant]]
+name = "notice_markers_match_anywhere_in_the_record"
+why = "As substrings, 'API Error' and friends deleted the model's own explanations from the corpus the ratios rest on."
+suites = ["tests.test_voice_tics.AssistantTextTest"]
+file = "voice_tics.py"
+find = "    if raw.lstrip().startswith(ASSISTANT_NOISE_MARKERS):"
+replace = "    if any(m in raw for m in ASSISTANT_NOISE_MARKERS):"
+
+[[mutant]]
+name = "dropped_notices_go_uncounted"
+why = "Every other exclusion is reported; an uncounted one is an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                        _count(stats, "noise_records")'
+replace = "                        pass"
+
+[[mutant]]
+name = "naive_timestamp_left_naive"
+why = "One offset-less timestamp aborted the whole scan with TypeError, but only under --days."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)"
+replace = "    return when"
+
+[[mutant]]
+name = "non_object_message_reaches_get"
+why = "A string message raised AttributeError out of the generator and lost every session after it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                if not isinstance(message, dict):\n                    message = {}"
+replace = "                if not message:\n                    message = {}"
+
+[[mutant]]
+name = "undecodable_byte_aborts_the_scan"
+why = "One bad byte in one transcript would raise out of the generator and cost every other session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '            fh = open(path, encoding="utf-8", errors="replace")'
+replace = '            fh = open(path, encoding="utf-8")'
+
+[[mutant]]
+name = "every_assistant_record_opens_a_response"
+why = "83% of the opener table was continuation text after a tool round-trip, so its headline concentration measured something else."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                turn_opens = opens if kind == "assistant" else True'
+replace = "                turn_opens = True"
+
+[[mutant]]
+name = "ngrams_span_the_whole_turn"
+why = "Phrases welded across sentence breaks and deleted code are strings nobody wrote, concentrated on the model's side."
+suites = ["tests.test_voice_tics.NgramTest"]
+file = "voice_tics.py"
+find = "        for s in sents:\n            for run in s.split(SCRUB_GAP):"
+replace = "        for s in [text]:\n            for run in [s]:"
+
+[[mutant]]
+name = "ngrams_span_a_scrubbed_gap"
+why = "The words either side of a removed code span were never adjacent."
+suites = ["tests.test_voice_tics.NgramTest"]
+file = "voice_tics.py"
+find = "            for run in s.split(SCRUB_GAP):"
+replace = "            for run in [s]:"
+
+[[mutant]]
+name = "sibling_widest_windows_all_kept"
+why = "A repeated string longer than six tokens filled the top rows with its own windows and pushed distinct tics off."
+suites = ["tests.test_voice_tics.NgramTest"]
+file = "voice_tics.py"
+find = "                   and f.mine <= w.mine * 1.35 for w in widest):"
+replace = "                   and False for w in widest):"
+
+[[mutant]]
+name = "narrow_windows_of_an_absorbed_string_kept"
+why = "Absorbing the widest windows is not enough if their narrower windows still print."
+suites = ["tests.test_voice_tics.NgramTest"]
+file = "voice_tics.py"
+find = "               for k in kept + widest):"
+replace = "               for k in kept):"
+
+[[mutant]]
+name = "transcript_glob_not_recursive"
+why = "A ** pattern silently read one level and the run reported success."
+suites = ["tests.test_voice_tics.MainTest"]
+file = "voice_tics.py"
+find = "                                        recursive=True) if os.path.isfile(p))"
+replace = "                                        recursive=False) if os.path.isfile(p))"
+
+[[mutant]]
+name = "structures_table_drops_the_floor"
+why = "Without the continuity floor the strongest possible tic printed 0.0x and sorted as unused."
+suites = ["tests.test_voice_tics.BaselineFloorTest"]
+file = "voice_tics.py"
+find = "        mr, tr = mine.rate(m), theirs.rate(max(t, BASELINE_FLOOR_COUNT))"
+replace = "        mr, tr = mine.rate(m), theirs.rate(t)"
+
+[[mutant]]
+name = "floor_equals_one_observation"
+why = "A floor of one makes 'never said it' tie with 'said it once', the ordering the floor exists to give."
+suites = ["tests.test_voice_tics.BaselineFloorTest"]
+file = "voice_tics.py"
+find = "BASELINE_FLOOR_COUNT = 0.5"
+replace = "BASELINE_FLOOR_COUNT = 1.0"
