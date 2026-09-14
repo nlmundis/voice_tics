@@ -628,8 +628,8 @@ def read_samples(pattern: str,
         window on 2026-09-12: 8.9 words per sentence on the chat side against
         12.2 on the model's, from only 249 baseline words, so read it as the
         direction of the gap rather than its size. (The sentence-length
-        figures in the README are a different measurement: a 45-day window,
-        13.89 / 13.85 on 2026-08-13 and 13.61 / 12.34 on 2026-09-13.)
+        figures in the README table are a different measurement: 45-day
+        windows, where the two sides came out much closer.)
 
         Samples are matched on register and on author, which is what you
         actually want when the thing being linted is a document. What they
@@ -1007,14 +1007,12 @@ STRUCTURE_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
     # WikiProject AI Cleanup "signs of AI writing" page, tropes.fyi, and
     # stephenturner/skill-deslop. These are HYPOTHESES, not rules. The whole
     # point of measuring them against a matched baseline is that the folk list
-    # is not automatically true of this model: the lexicon below scores 0.6x
-    # on the cleaned reference corpus (model 1.47 vs baseline 2.38 per 10k,
-    # 2026-08-13), meaning the baseline author used these words 1.6 times as
-    # often as the model did, and 0.99x when re-measured on 2026-09-13
-    # (0.51 vs 0.52 per 10k, from 45 and 5 uses).
-    # (The 0.3x this comment first carried was measured against the isMeta-
-    # contaminated corpus.) A rule adopted from the list unmeasured would have
-    # "corrected" the wrong writer.
+    # is not automatically true of this model: on the cleaned reference corpus
+    # the lexicon below came out under parity, then at it (README table), so
+    # the baseline author uses these words at least as often as the model.
+    # (The first figure this comment carried was measured against the isMeta-
+    # contaminated corpus, and was lower still.) A rule adopted from the list
+    # unmeasured would have "corrected" the wrong writer.
     (
         "delve_ecosystem",
         r"\b(?:delve|leverage|robust|seamless(?:ly)?|holistic|nuanced|"

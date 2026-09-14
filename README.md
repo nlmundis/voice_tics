@@ -48,39 +48,51 @@ it does not decide what a tic is, and it cannot.
 
 ### What the method found
 
-One author, measured twice a month apart, both times over a 45-day window of
-Claude Code transcripts against the author's own turns, with every model in the
-window blended. The first column is the private original this repo was
-extracted from; the second is this repo's code, on 563 transcripts holding
-885,083 words of model prose and 96,897 of the author's. Ratios are model rate
-over author rate; the counts are uses in the second window, model / author.
+One author, measured twice a month apart. Both runs take a 45-day window of
+Claude Code transcripts, rank the model against the author's own turns in the
+same files, and blend every model in the window.
+
+- **2026-08-13**, the private tool this repo was extracted from: 233
+  transcripts read, 134 of them dropped whole as scheduled runs, leaving
+  381,274 words of model prose against 56,715 of the author's.
+- **2026-09-13**, this repo: 563 transcripts read, 257 dropped as scheduled
+  runs, leaving 885,083 words against 96,897.
+
+Ratios are the model's rate over the author's. In brackets are the uses each
+ratio rests on, model / author.
 
 | Measured | 2026-08-13 | 2026-09-13 | What a wordlist does |
 |---|---|---|---|
-| Mean sentence length | 13.89 model vs 13.85 author | **13.61** model vs **12.34** author | Fails builds over 16 |
-| Em dash | 1.0x | **1.75x** (14,747 / 922) | Treats it as the signature tell |
-| The slop lexicon (*delve*, *crucial*, …) | 0.6x | **0.99x** (45 / 5) | Flags them as machine-written |
-| `not_x_but_y` ("it's not A, it's B") | 7.7x | **12.4x** (113 / 1) | Not on any list |
-| `method_defence` (defending the method instead of stating the finding) | 10.0x | **3.8x** (345 / 10) | Not on any list |
+| Mean sentence length (words) | 14.00 model, 13.92 author | 13.61 model, 12.34 author | Fails builds over 16 |
+| Em dash | 2.3x (7,872 / 505) | 1.8x (14,747 / 922) | Treats it as the signature tell |
+| The slop lexicon (*delve*, *crucial*, …) | 0.6x (54 / 13) | 1.0x (45 / 5) | Flags them as machine-written |
+| `appositive_negation` ("Y, not X") | 2.3x (1,146 / 74) | 1.7x (2,462 / 157) | Not on any list |
+| `not_x_but_y` ("it's not A, it's B") | 7.7x (52 / 1) | 12.4x (113 / 1) | Not on any list |
+| `method_defence` (defending the method instead of stating the finding) | 10.0x (134 / 2) | 3.8x (345 / 10) | Not on any list |
 
-On both dates the two structures in this table that separated most are on no
-public list,
-and the folk tells separated weakly or not at all. The slop lexicon sits at
-parity: the author uses it as often as the model does. Mean sentence length
-differs by about a tenth, with both sides well under the 16-word gate the
-predecessor linter used.
+The two rows that separated most are on no public list, on both dates. Read
+them with their counts: they rest on one and two of the author's uses in
+August and on one and ten in September, so a single further use by the author
+would halve `not_x_but_y` on either date. They are candidates the ratio
+surfaced, not constants.
 
-The em dash moved. Identical in August, it was 1.75x in September: the same
-separation as `appositive_negation` (1.7x), which ships only as a warning. And the
-author still wrote it 922 times in the window, so a gate on it fails the
-author's own prose constantly.
+Two of the folk tells did not separate. The slop lexicon ran the author's way
+in August and sat at parity in September, on 13 and then 5 of the author's
+uses. Mean sentence length stayed inside the tool's own parity band, a quarter
+either way, on both dates.
 
-The month moved every row, on the same author and the same method.
-`method_defence` fell from 10.0x to 3.8x. The rows resting on a handful of
-the author's uses are the least stable: `not_x_but_y` stands on a single one
-in September, so one more would halve it. That is the best argument this
-repo has for measuring your own corpus instead of trusting anyone's table,
-this one included.
+The em dash did separate: 2.3x, then 1.8x, on hundreds of the author's uses,
+about as much as `appositive_negation`, which ships only as a warning. The
+em-dash rule ships off anyway, because it is one author's punctuation rule
+rather than a measured tic: it flags lone dashes, not a rate, and on the
+September window it would have raised 803 findings across 68 of the author's
+1,883 turns.
+
+Every row moved between the dates, and the code is not why: the private tool,
+run over the September transcripts, gives ratios within 7% of this repo's. The
+transcripts changed, and the two windows share only two weeks. That is the
+best argument this repo has for measuring your own corpus rather than
+trusting anyone's table, this one included.
 
 Sentence length is **reported and can never fail a run** in `prose_lint`. The
 em-dash rule ships **off**.

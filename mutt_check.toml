@@ -700,3 +700,37 @@ suites = ["tests.test_prose_lint.OneEngineForEveryRule", "tests.test_prose_lint.
 file = "prose_lint.py"
 find = '''        "." if emdash.is_table_row(plain) else raw'''
 replace = '''        "" if emdash.is_table_row(plain) else raw'''
+
+# --- measured figures: one table, one provenance, held cell for cell -------
+
+[[mutant]]
+name = "provenance_reverted_to_the_august_figure"
+why = "With both dates in the README, a whole-file substring check passed a note put back to its old figure."
+suites = ["tests.test_repo.DocsTest"]
+file = "prose_lint.py"
+find = '        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); "'
+replace = '        "10.0x model/baseline, 2026-09-13 (345 / 10 uses); "'
+
+[[mutant]]
+name = "readme_counts_drift_from_the_code"
+why = "The counts are what tell a reader a ratio rests on two uses; a drifted count misstates how much to trust it."
+suites = ["tests.test_repo.DocsTest"]
+file = "README.md"
+find = "| 10.0x (134 / 2) |"
+replace = "| 10.0x (134 / 3) |"
+
+[[mutant]]
+name = "substring_of_a_larger_ratio_passes"
+why = "'12.4x' contains '2.4x'; a substring match let the wrong figure through."
+suites = ["tests.test_repo.DocsTest"]
+file = "prose_lint.py"
+find = '        "12.4x model/baseline, 2026-09-13 (113 / 1 uses); "'
+replace = '        "2.4x model/baseline, 2026-09-13 (113 / 1 uses); "'
+
+[[mutant]]
+name = "measured_ratio_copied_into_a_docstring"
+why = "An unchecked copy is how 1.0x sat in four files with no measurement behind it, each looking like corroboration."
+suites = ["tests.test_repo.DocsTest"]
+file = "emdash.py"
+find = "does separate, but only about as much as the warning-tier"
+replace = "does separate (2.3x), but only about as much as the warning-tier"

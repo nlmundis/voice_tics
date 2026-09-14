@@ -7,12 +7,13 @@ That is why ``[lint.emdash] enabled`` is false by default.
 
 WHY IT SHIPS ANYWAY
     The em dash is the single most-cited "AI tell" in public advice, which
-    makes it the best illustration of this repo's argument. On the reference
-    corpus the model's em-dash rate and the baseline author's were 1.0x apart
-    on 2026-08-13, and 1.75x a month later: no more separation than the
-    warning-tier ``appositive_negation``, while the author still wrote it 922
-    times in that window. A wordlist tool gates on it and corrects the wrong
-    writer; the matched baseline says it is at most a prompt to look.
+    makes it a good test of this repo's argument. On the reference corpus it
+    does separate, but only about as much as the warning-tier
+    ``appositive_negation`` (figures in the README table), and the author
+    writes hundreds of them too. A wordlist tool treats it as the signature
+    tell and fails the build on it; the matched baseline says it is a weak,
+    shared signal, and a lone-dash rule run over the author's own turns fires
+    hundreds of times.
 
     So the useful thing this module does for most people is not failing their
     build. It is putting a number on the tell before they act on it. Run

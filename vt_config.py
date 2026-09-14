@@ -75,11 +75,12 @@ DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 
 # Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
 # two are the defaults because they are the ones whose measured separation was
-# large enough to act on. The ratios themselves live in ONE place,
-# ``prose_lint.TIC_PROVENANCE``, and are deliberately not repeated here: a
-# second copy of a measurement is how one of them goes stale (this comment
-# once carried 6.6x for method_defence, the figure for the detector before it
-# was sharpened, when every other copy had moved on). They are still only a
+# large enough to act on. The ratios themselves live in the README table and
+# ``prose_lint.TIC_PROVENANCE``, which tests/test_repo.py holds cell for cell,
+# and are deliberately not repeated here: an unchecked copy of a measurement is
+# how one of them goes stale (this comment once carried method_defence's figure
+# for the detector before it was sharpened, after every other copy had moved
+# on). They are still only a
 # default: the whole argument of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 

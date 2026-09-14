@@ -7,18 +7,17 @@ on a matched corpus. Nothing is here because it sounds robotic.
 WHAT IS DELIBERATELY ABSENT, AND WHY
     * **Any sentence-length or readability threshold.** The measurement that
       motivated this tool found mean sentence length does not separate the two
-      writers: 13.89 words for the model against 13.85 for the author (45-day
-      corpus, 2026-08-13), and 13.61 against 12.34 a month later, both well
-      under the 16-word gate the predecessor used. A length gate therefore lints an ACADEMIC REGISTER —
-      long compound-complex sentences, passive voice, "However" — and deletes
-      it. The tool that did exactly that to the reference author drew this
+      writers: on both measured dates it stayed inside the tool's own parity
+      band (see the README table). A length gate therefore lints an ACADEMIC
+      REGISTER — long compound-complex sentences, passive voice, "However" —
+      and deletes it. The tool that did exactly that to the reference author drew this
       summary from him: "we essentially made me sound simpler so I don't sound
       like AI." Sentence length is REPORTED here and can never fail a run.
 
-    * **The slop lexicon** ("delve", "crucial", …): measured at 0.6x on
-      2026-08-13 and 0.99x on 2026-09-13, meaning the author uses those words
-      at least as often as the model does. A lexicon rule would correct the
-      wrong writer.
+    * **The slop lexicon** ("delve", "crucial", …): measured below parity, then
+      at it (see the README table), meaning the author uses those words at
+      least as often as the model does. A lexicon rule would flag the author
+      as readily as the model.
 
     * **The chat-register family** ("let me check", "want me to"): the largest
       measured tics by far, and useless here, because none of them can appear
@@ -26,25 +25,26 @@ WHAT IS DELIBERATELY ABSENT, AND WHY
       as a property of the register rather than of the prose.
 
 WHAT FAILS A RUN INSTEAD
-    Structures, at the model's measured ratios (per 10k words, model over
-    baseline, 45-day matched corpus, 2026-09-13; see TIC_PROVENANCE for the
-    earlier figures). Which keys are in force is config; these are the
-    shipped defaults:
+    Structures, at the model's measured ratios. The figures and the counts
+    they rest on are in ``TIC_PROVENANCE`` below and in the README table,
+    which a test holds together; they are not repeated here, because a third
+    copy is how one of them goes stale. Which keys are in force is config;
+    these are the shipped defaults:
 
-    * ``method_defence`` — 3.8x. Defending the method instead of stating the
+    * ``method_defence``: defending the method instead of stating the
       finding. It reaches documents through model drafts rather than through
       the author's own writing, so flagging it corrects the right author.
-    * ``not_x_but_y`` — 12.4x. The explicit "it's not A, it's B" reveal.
-    * ``appositive_negation`` — 1.7x, a WARNING rather than an error: it is
+    * ``not_x_but_y``: the explicit "it's not A, it's B" reveal.
+    * ``appositive_negation``: a WARNING rather than an error. It is
       model-heavier but genuinely shared, so an occurrence is a prompt to
       look, not proof of a draft. ``--strict`` promotes warnings to failures.
 
-    A lone em dash is available as a rule and ships OFF. It is one author's
-    punctuation preference. On the reference corpus the em-dash rates were
-    identical (1.0x) on 2026-08-13 and 1.75x apart a month later, no more
-    separation than the warning-tier ``appositive_negation``, while the author
-    still wrote it hundreds of times. Turn it on only if your own ratio says
-    something.
+    A lone em dash is available as a rule and ships OFF. The em dash does
+    separate on the reference corpus, about as much as the warning-tier
+    ``appositive_negation``, but the rule is one author's punctuation
+    preference: it flags lone dashes, not a rate, and it fires on the
+    author's own turns hundreds of times in a 45-day window. Turn it on only
+    if your own measurement says something.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     Those ratios come from one author and one corpus. Run ``voice_tics.py``
@@ -83,8 +83,10 @@ import emdash
 import voice_tics
 
 # Why each DEFAULT tier key is in the tier it is in, as a rate ratio of
-# model-over-baseline on the reference corpus (45 days, re-measured 2026-09-13
-# with this repo's code; the 2026-08-13 figures are kept beside them). Kept
+# model-over-baseline on the reference corpus (45-day windows, measured
+# 2026-08-13 with the private original and 2026-09-13 with this repo), with
+# the model / author uses each ratio rests on. tests/test_repo.py checks every
+# figure here against the README table's cell for the same key and date. Kept
 # beside the keys so a future re-tiering starts from the number that put them
 # there rather than from taste, and so anyone can see the defaults are a
 # measurement someone took and not a preference someone had.
@@ -95,13 +97,16 @@ import voice_tics
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
     "method_defence":
-        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); 10.0x on 2026-08-13",
+        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); "
+        "10.0x on 2026-08-13 (134 / 2 uses)",
     "not_x_but_y":
-        "12.4x model/baseline, 2026-09-13 (113 / 1 uses, so unstable); "
-        "7.7x on 2026-08-13",
+        "12.4x model/baseline, 2026-09-13 (113 / 1 uses); "
+        "7.7x on 2026-08-13 (52 / 1 uses); one author use on both dates, "
+        "so the ratio is unstable",
     "appositive_negation":
-        "1.7x model/baseline, 2026-09-13 (2,462 / 157 uses); 2.4x on "
-        "2026-08-13 — shared, model-heavier, so a warning rather than an error",
+        "1.7x model/baseline, 2026-09-13 (2,462 / 157 uses); "
+        "2.3x on 2026-08-13 (1,146 / 74 uses); shared, model-heavier, so a "
+        "warning rather than an error",
 }
 
 EXCERPT_CAP = 60
@@ -364,9 +369,10 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
 
 
 INFO_NOTE = (
-    "reported, never a failure: mean sentence length does not separate "
-    "model from author (13.61 vs 12.34 words, 2026-09-13), so a threshold "
-    "here would lint the author's register, not the machine's"
+    "reported, never a failure: mean sentence length stayed inside the "
+    "parity band between model and author on both measured dates (see the "
+    "README), so a threshold here would lint the author's register, not the "
+    "machine's"
 )
 
 

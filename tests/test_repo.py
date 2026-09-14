@@ -288,19 +288,68 @@ class DocsTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(os.path.isfile(os.path.join(REPO, name)))
 
-    def test_the_measured_ratios_in_the_readme_match_the_code(self) -> None:
-        """The README's headline table and TIC_PROVENANCE must agree.
+    # One measured figure in TIC_PROVENANCE: a ratio, the date it was
+    # measured, and the model / author uses behind it.
+    PROVENANCE_FIGURE = re.compile(
+        r"(?P<ratio>\d+\.\d+x)\b[^;]*?(?P<date>\d{4}-\d{2}-\d{2})\s*"
+        r"\((?P<counts>[\d,]+ / [\d,]+) uses\)")
 
-        Two copies of a measurement is how one of them quietly becomes wrong.
+    def _headline_table(self) -> "tuple[list, dict]":
+        """The dated columns and the rows of the README's measurement table."""
+        lines = self._readme().splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if line.startswith("|") and re.search(r"\d{4}-\d{2}-\d{2}", line))
+        header = [c.strip() for c in lines[start].strip("|").split("|")]
+        rows = {}
+        for line in lines[start + 2:]:
+            if not line.startswith("|"):
+                break
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            rows[cells[0]] = cells
+        return header, rows
+
+    def test_the_measured_ratios_in_the_readme_match_the_code(self) -> None:
+        """Every figure in TIC_PROVENANCE equals the README cell for its key
+        and date, counts included.
+
+        Matching the ratio anywhere in the README stopped meaning anything once
+        the table carried two dates: a note reverted to the August figure still
+        found that figure in the August column, and "12.4x" contains "2.4x".
         """
-        readme = self._readme()
+        header, rows = self._headline_table()
         for key, note in prose_lint.TIC_PROVENANCE.items():
-            ratio = re.match(r"([\d.]+x)", note)
-            if ratio and f"`{key}`" in readme:
-                with self.subTest(key=key):
-                    self.assertIn(ratio.group(1), readme,
-                                  f"{key} is {ratio.group(1)} in code; the "
-                                  "README says otherwise")
+            figures = list(self.PROVENANCE_FIGURE.finditer(note))
+            row = next((cells for label, cells in rows.items()
+                        if label.startswith(f"`{key}`")), None)
+            with self.subTest(key=key):
+                self.assertTrue(figures, f"{key}'s note carries no dated figure")
+                self.assertIsNotNone(row, f"the README table has no {key} row")
+                self.assertEqual(sorted(f.group("date") for f in figures),
+                                 sorted(h for h in header
+                                        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", h)),
+                                 f"{key}'s dates differ from the table's columns")
+                for fig in figures:
+                    cell = row[header.index(fig.group("date"))]
+                    self.assertEqual(
+                        cell, f"{fig.group('ratio')} ({fig.group('counts')})",
+                        f"{key} on {fig.group('date')}: code says "
+                        f"{fig.group('ratio')} ({fig.group('counts')}), "
+                        f"README says {cell}")
+
+    def test_measured_ratios_are_not_copied_into_other_files(self) -> None:
+        """Only the README table and TIC_PROVENANCE carry the figures.
+
+        The August em dash sat in four files as 1.0x, a figure no measurement
+        ever produced, and each copy looked like corroboration for the others.
+        Anywhere else a ratio is a copy nothing checks.
+        """
+        provenance = re.compile(r"TIC_PROVENANCE: Dict\[str, str\] = \{.*?\n\}",
+                                re.S)
+        for name in ("prose_lint.py", "emdash.py", "vt_config.py",
+                     "voice_tics.toml.example"):
+            text = provenance.sub("", _read(os.path.join(REPO, name)))
+            with self.subTest(file=name):
+                self.assertEqual(re.findall(r"\b\d+\.\d+x\b", text), [])
 
 
 class StdlibOnlyTest(unittest.TestCase):
