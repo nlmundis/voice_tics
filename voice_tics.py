@@ -23,7 +23,7 @@ WHY A MATCHED BASELINE, NOT A WORD LIST
     at similar rates is just the subject matter.
 
     The register caveat is real and is reported rather than hidden: your turns
-    are short and imperative, the model's are long and explanatory, so
+    are typically short and imperative, the model's longer and explanatory, so
     explanatory connectives are over-represented by construction. Ratios are
     evidence for review, never a verdict.
 
@@ -178,17 +178,22 @@ USER_NOISE_MARKERS = (
 )
 
 # A message one session's model sent to another. The harness delivers it as a
-# USER record in the receiving session, with no flag, so counted as your prose
-# it put the model on both sides of every ratio. Found 2026-09-14: in the
-# reference author's 45-day window, ten such records survived every other
-# filter. Cut out like a system reminder, so anything typed beside one is
-# kept, and keyed on the ``from`` attribute the harness always writes, so a
-# tag you type while discussing the harness does not match. An unclosed one
-# drops the record, as an unclosed reminder does.
+# USER record in the receiving session, sometimes flagged isMeta and sometimes
+# not, so counted as your prose it put the model on both sides of every ratio.
+# Measured 2026-09-14 on the reference author's transcripts: 45 of 55 such
+# records carried isMeta and were already dropped as flagged, and the other 10
+# survived every other filter. Cut out like a system reminder, so anything
+# typed beside one is kept. Keyed on the ``from`` attribute the harness
+# writes, so a bare mention of the tag is kept; a typed copy of a whole tag,
+# attribute and all, cannot be told from a real one and is cut too. A tag left
+# over after cutting, open or close, drops the record, as an unclosed reminder
+# does: a message that quotes a close tag would otherwise leak its remainder
+# into your prose.
 CROSS_SESSION_RE = re.compile(
     r'<cross-session-message from="[^"]*"[^>]*>.*?</cross-session-message>',
     re.DOTALL)
 CROSS_SESSION_OPEN = '<cross-session-message from="'
+CROSS_SESSION_CLOSE = "</cross-session-message>"
 
 # Boilerplate carried by every scheduled-task prompt. A scheduled run logs its
 # prompt as a user record, so without this the automation's own wording is
@@ -395,7 +400,9 @@ def _user_prose(content: object) -> Tuple[Optional[str], str]:
     left. ``withheld`` is ``"cross_session"`` when a message from another
     session was cut out (whether or not text of yours remains beside it),
     ``"notice"`` when the record is harness output, and ``""`` otherwise, so
-    the caller can count what it dropped rather than dropping it silently.
+    the caller can count what it dropped rather than dropping it silently. A
+    record carrying both reports ``"cross_session"`` only, so it is counted
+    once.
 
     A user record may be a bare string or a block list. A record carrying a
     tool_result block is a tool round-trip, machine output end to end, so it
@@ -430,7 +437,7 @@ def _user_prose(content: object) -> Tuple[Optional[str], str]:
     if CROSS_SESSION_OPEN in raw:
         withheld = "cross_session"
         raw = CROSS_SESSION_RE.sub("\n", raw)
-        if CROSS_SESSION_OPEN in raw:
+        if CROSS_SESSION_OPEN in raw or CROSS_SESSION_CLOSE in raw:
             return None, withheld
     if not raw.strip():
         return None, withheld
@@ -587,7 +594,9 @@ def read_turns(paths: Sequence[str],
                     # isMeta, so neither can hide the one record that marks a
                     # scheduled run: a --days cutoff falling after the prompt
                     # re-admitted the rest of that session, and the report
-                    # then said nothing had been dropped.
+                    # then said nothing had been dropped. It tests your text
+                    # after cross-session messages are cut out, so another
+                    # session quoting a marker does not drop yours.
                     if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
                         automated = True
                         break
@@ -1324,8 +1333,8 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"harness-composed (isMeta), "
                    f"{stats.get('compact_summaries', 0):,} compaction "
                    f"summaries, "
-                   f"{stats.get('cross_session_messages', 0):,} cross-session "
-                   f"messages, "
+                   f"{stats.get('cross_session_messages', 0):,} with "
+                   f"cross-session messages cut out, "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('sidechain_records', 0):,} subagent, "

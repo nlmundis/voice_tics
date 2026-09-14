@@ -497,6 +497,48 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(len(self.turns), 1)
         self.assertNotIn("cross_session_messages", stats)
 
+    def test_a_quoted_close_tag_does_not_leak_the_rest_of_a_message(self) -> None:
+        """A message quoting the close tag ends the non-greedy match early;
+        what follows is still the other session's text."""
+        quoting = ('<cross-session-message from="a1b2">The tag ends with '
+                   "</cross-session-message> and then more of the message."
+                   "</cross-session-message>")
+        stats = self._stats([_rec("user", quoting)])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_text_typed_between_two_messages_is_kept(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS + "\nyes, merge it\n"
+                                          + self.CROSS)])
+        self.assertEqual([t.text.strip() for t in self.turns], ["yes, merge it"])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_a_notice_beside_a_cross_session_message_drops_the_record(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS
+                                  + "\n[Request interrupted by user]")])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+        self.assertNotIn("noise_records", stats)
+
+    def test_a_marker_quoted_by_another_session_keeps_yours(self) -> None:
+        """The marker test reads your text after the message is cut out."""
+        quoting = ('<cross-session-message from="a1b2">This is a scheduled '
+                   "task.</cross-session-message>\nplease look at this")
+        stats = self._stats([_rec("user", quoting),
+                             _rec("assistant", "Looking.")])
+        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
+
+    def test_a_record_with_no_timestamp_is_inside_the_window(self) -> None:
+        undated = json.loads(_rec("user", "x", meta=True))
+        del undated["timestamp"]
+        kept = json.loads(_rec("user", "undated words"))
+        del kept["timestamp"]
+        stats = self._stats([json.dumps(undated), json.dumps(kept)],
+                            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc))
+        self.assertEqual([t.text for t in self.turns], ["undated words"])
+        self.assertEqual(stats.get("meta_records"), 1)
+
     def test_an_unclosed_cross_session_message_drops_the_record(self) -> None:
         stats = self._stats([_rec("user", self.CROSS.split("</")[0])])
         self.assertEqual(self.turns, [])
@@ -518,11 +560,16 @@ class ReadTurnsTest(unittest.TestCase):
              _rec("user", self.CROSS, ts=old),
              _rec("assistant", "Alpha.", model="<synthetic>", ts=old),
              _rec("assistant", "Beta.", sidechain=True, ts=old),
+             _rec("assistant", "Gamma.", model="other", ts=old),
+             _rec("assistant", "API Error: 500", model="m", ts=old),
+             _rec("user", "<task-notification>x</task-notification>", ts=old),
              _rec("user", "in the window")],
-            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc))
+            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc), model="m")
         self.assertEqual([t.text for t in self.turns], ["in the window"])
+        self.assertEqual(stats.get("turns"), 1)
         for key in ("compact_summaries", "meta_records", "synthetic_records",
-                    "cross_session_messages", "sidechain_records"):
+                    "cross_session_messages", "sidechain_records",
+                    "model_filtered", "noise_records"):
             self.assertNotIn(key, stats)
 
     def test_a_subagent_record_is_counted(self) -> None:
@@ -542,11 +589,20 @@ class ReadTurnsTest(unittest.TestCase):
     def test_the_report_names_every_exclusion_counter(self) -> None:
         mine, theirs = vt.Corpus("m"), vt.Corpus("t")
         structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        counts = {"meta_records": 11, "compact_summaries": 12,
+                  "cross_session_messages": 13, "synthetic_records": 14,
+                  "noise_records": 15, "sidechain_records": 16,
+                  "model_filtered": 17}
         report = vt.render(mine, theirs, [], structures, 0, False,
-                           stats={"sessions": 1, "cross_session_messages": 4,
-                                  "sidechain_records": 6})
-        self.assertIn("4 cross-session messages", report)
-        self.assertIn("6 subagent", report)
+                           stats={"sessions": 1, **counts})
+        line = next(l for l in report.splitlines()
+                    if l.startswith("Excluded records:"))
+        for phrase in ("11 harness-composed (isMeta)", "12 compaction summaries",
+                       "13 with cross-session messages cut out",
+                       "14 synthetic", "15 harness notices", "16 subagent",
+                       "17 other-model"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, line)
 
     def test_a_timestamp_without_an_offset_is_utc_not_a_crash(self) -> None:
         stats = self._stats(

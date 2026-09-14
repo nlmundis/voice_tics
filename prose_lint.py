@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Lint a document for model tics chosen by measuring against a matched baseline.
 
-Every rule here was chosen because it separated the model from a human author
-on a matched corpus, not because it sounds robotic. Those measurements have
+Every rule here was chosen on ratios measured against a human author on a
+matched corpus, not because it sounds robotic. Those measurements have
 since been withdrawn (see the README: the transcript baseline counted some of
 the model's writing as the author's), so the defaults are a starting point.
 Measure your own before you rely on them.
