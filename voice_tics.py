@@ -503,6 +503,52 @@ def _parse_when(rec: dict) -> Optional[dt.datetime]:
     return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
 
 
+def _replay_key(rec: dict) -> Optional[Tuple[str, str]]:
+    """Identify a record written again later in its transcript, or None.
+
+    The key is the record's ``uuid`` paired with a SHA-256 of its ``message``
+    serialised with sorted keys, so two records share a key only when the same
+    message was written under the same uuid. Fields the copies observed so far
+    rewrite (``slug``, ``cwd``, ``promptId``, ``parentUuid``,
+    ``toolUseResult``) stay outside the key. Both halves fail toward counting:
+    a record with no uuid gets no key, since a copy of it cannot be told from
+    the same words sent again, and a reused uuid with a different message gets
+    a different key, since dropping it would hide text no earlier record
+    carried. The message is hashed rather than kept so the set of seen keys
+    stays small, and encoded with ``surrogatepass`` because JSON can escape
+    half a surrogate pair, which strict UTF-8 refuses.
+
+    Args:
+        rec: One parsed transcript record.
+
+    Returns:
+        ``(uuid, message digest)``, or None when ``uuid`` is absent or not a
+        non-empty string, in which case the caller must not collapse it.
+    """
+    uuid = rec.get("uuid")
+    if not isinstance(uuid, str) or not uuid:
+        return None
+    blob = json.dumps(rec.get("message"), sort_keys=True, ensure_ascii=False,
+                      default=str)
+    return uuid, hashlib.sha256(blob.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _carries_text(kind: object, message: object) -> bool:
+    """Whether a record carries text a turn could be read from.
+
+    A user record does unless it is a tool round-trip; an assistant record
+    does when it has a non-blank text block. A record that is only a tool
+    call, a tool result or a thinking block never became a turn, so a copy of
+    one removes nothing from either corpus.
+    """
+    content = message.get("content") if isinstance(message, dict) else None
+    if kind == "assistant":
+        return _has_text(content)
+    if isinstance(content, str):
+        return bool(content.strip())
+    return not _is_tool_result(content) and _has_text(content)
+
+
 def _open_transcript(path: str) -> Optional[IO[str]]:
     """A transcript opened for reading, or None when it cannot be opened.
 
@@ -585,6 +631,13 @@ def read_turns(paths: Sequence[str],
     session (see ``composed_prompts``), which costs one extra read of
     ``paths`` to find those prompts.
 
+    A record is dropped when an earlier record in the same file had the same
+    ``uuid`` and the same ``message`` (see ``_replay_key``). A transcript can
+    hold a run of its own earlier records written again, directly after a
+    resume's session metadata; read as new records, every turn in that run
+    was held twice. The scope is one file: the same uuid in two transcripts
+    is not collapsed.
+
     Args:
         paths: Session .jsonl paths. One file is one session, which is what
             makes the session-level automated test possible in a single pass.
@@ -593,8 +646,8 @@ def read_turns(paths: Sequence[str],
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``compact_summaries``/
             ``cross_session_messages``/``spawned_prompts``/
-            ``synthetic_records``/
-            ``sidechain_records``/``model_filtered``/``noise_records``) so the
+            ``synthetic_records``/``sidechain_records``/
+            ``model_filtered``/``noise_records``/``replayed_records``) so the
             caller can report what was excluded instead of excluding it
             silently. An exclusion counter counts only records the scan
             would otherwise have kept: inside ``since`` and in a session
@@ -620,6 +673,8 @@ def read_turns(paths: Sequence[str],
         # True until the first assistant prose after something you sent, so
         # the opener table counts responses rather than records.
         opens = True
+        # Keys of the records already read in this file, per _replay_key.
+        seen: Set[Tuple[str, str]] = set()
         fh = _open_transcript(path)
         if fh is None:
             continue
@@ -646,6 +701,26 @@ def read_turns(paths: Sequence[str],
                 # date cutoff drops anyway, which would report an exclusion
                 # the window never contained.
                 tally = excluded if in_window else None
+                # A copy of an earlier record is dropped before any exclusion
+                # test, so it is counted once, here, rather than again under
+                # its original's exclusion, and it cannot move ``opens``.
+                # Measured 2026-09-14 over a snapshot of 563 transcripts, all
+                # dates: 721 assistant and 447 user records were such copies,
+                # in 4 files, and no copy differed from its original in type,
+                # timestamp or any flag tested below. The key is recorded
+                # here, once the record is admitted as a user or assistant
+                # record, so a line of another type cannot hide one. A copy
+                # is counted only when it carries text (see _carries_text): in
+                # the 45-day window ending 2026-09-13, 1,132 copies were
+                # dropped and 180 carried text, 175 of them kept turns, 4
+                # harness notices and 1 isMeta record.
+                key = _replay_key(rec)
+                if key is not None:
+                    if key in seen:
+                        if _carries_text(kind, rec.get("message")):
+                            _count(tally, "replayed_records")
+                        continue
+                    seen.add(key)
                 if rec.get("isSidechain"):
                     _count(tally, "sidechain_records")
                     continue
@@ -1432,7 +1507,9 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('sidechain_records', 0):,} subagent, "
-                   f"{stats.get('model_filtered', 0):,} other-model.")
+                   f"{stats.get('model_filtered', 0):,} other-model, "
+                   f"{stats.get('replayed_records', 0):,} copies of an "
+                   f"earlier record.")
     out.append("")
 
     if show_source_text:
