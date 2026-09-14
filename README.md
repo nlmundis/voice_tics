@@ -57,11 +57,12 @@ it. Claude Code flags two kinds of user record it wrote itself: slash-command
 expansions and similar (`isMeta`), and the summaries it writes when it compacts
 a conversation (`isCompactSummary`). This tool drops both, and drops records it
 recognises by their content too: harness notices, hook output, messages another
-session's model sent, and whole scheduled-run sessions. Whatever it does not
-recognise counts as the author. On the reference author's 45-day window ending
-2026-09-13, after every exclusion the tool makes, about a quarter of the words
-left as "the author" were prompts the model had drafted for sessions the author
-launched, and nearly a fifth more were in turns whose opening text recurred at
+session's model sent, prompts a model wrote for a session the author then
+launched, and whole scheduled-run sessions. Whatever it does not recognise
+counts as the author. On the reference author's 45-day window ending
+2026-09-13, those spawned-session prompts were about a quarter of the words
+left before the tool recognised them, and after every exclusion it now makes,
+about a quarter of the words left are in turns whose opening text recurred at
 the start of five or more sessions, which the author may or may not have typed
 each time. Each correction moved the headline ratios, some of them several
 times over.
@@ -218,14 +219,17 @@ your transcripts.**
 - Sample files are read as UTF-8 markdown or plain text. One unreadable file
   is counted and skipped, never fatal.
 - The transcript baseline is only as clean as the harness's own flags and the
-  markers this tool knows. Records flagged `isMeta` or `isCompactSummary` and
-  harness notices are dropped and counted; cross-session messages are cut out,
-  or dropped with their record when a tag is left over, and counted. A user
-  record it does not recognise is counted as yours whoever wrote it: a session
-  prompt a model drafted and you launched, a template you run repeatedly, text
-  you pasted. On the reference author's 45-day window ending 2026-09-13,
-  spawned-session prompts alone were 10,643 of the 44,314 author words the
-  report kept.
+  markers this tool knows. Records flagged `isMeta` or `isCompactSummary`,
+  harness notices, and prompts a model wrote for a session you launched are
+  dropped and counted; cross-session messages are cut out, or dropped with
+  their record when a tag is left over, and counted. A spawned session's prompt
+  is recognised only when the transcript that launched it is read too, at the
+  cost of one extra read of every transcript. A user record it does not
+  recognise is counted as yours whoever wrote it: a template you run
+  repeatedly, text you pasted, a spawned prompt whose parent was not read. On
+  the reference author's 45-day window ending 2026-09-13, turns opening with
+  text repeated at the start of five or more sessions were 8,389 of the 33,671
+  author words the report kept.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged

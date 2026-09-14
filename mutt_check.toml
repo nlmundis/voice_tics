@@ -444,8 +444,8 @@ name = "undecodable_byte_aborts_the_scan"
 why = "One bad byte in one transcript would raise out of the generator and cost every other session."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = '            fh = open(path, encoding="utf-8", errors="replace")'
-replace = '            fh = open(path, encoding="utf-8")'
+find = "        return open(path, encoding=\"utf-8\", errors=\"replace\")"
+replace = "        return open(path, encoding=\"utf-8\")"
 
 [[mutant]]
 name = "every_assistant_record_opens_a_response"
@@ -1108,3 +1108,78 @@ suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)"
 replace = "    first, last = offsets[node.lineno - 1], offsets[node.end_lineno]"
+
+# --- prompts a model wrote for a session you launched ----------------------
+
+
+[[mutant]]
+name = "spawned_prompt_counted_as_the_author"
+why = "spawn_task hands the model's prompt to a new session as an unflagged user record; 39 such records were a quarter of one 45-day baseline's words."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if spawned:\n                        _count(tally, \"spawned_prompts\")"
+replace = "                    if False:\n                        _count(tally, \"spawned_prompts\")"
+
+[[mutant]]
+name = "spawned_prompts_dropped_uncounted"
+why = "An exclusion the report never shows hides how much of the baseline was the model's prompt."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"spawned_prompts\")"
+replace = "                        pass"
+
+[[mutant]]
+name = "spawned_prompts_missing_from_the_report"
+why = "A counted exclusion that never prints is still an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   f\"{stats.get('spawned_prompts', 0):,} spawned-session \""
+replace = "                   f\"\""
+
+[[mutant]]
+name = "prompt_matched_on_a_prefix"
+why = "A record that starts with the model's prompt and goes on in the author's words is the author's; only the whole text matches."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return hashlib.sha256(\" \".join(text.split()).encode(\"utf-8\")).hexdigest()"
+replace = "    return hashlib.sha256(\" \".join(text.split())[:60].encode(\"utf-8\")).hexdigest()"
+
+[[mutant]]
+name = "prompt_matched_with_its_wrapping"
+why = "The harness and the reminder cut change line breaks and spacing; matching raw text misses the same prompt rewrapped."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return hashlib.sha256(\" \".join(text.split()).encode(\"utf-8\")).hexdigest()"
+replace = "    return hashlib.sha256(text.encode(\"utf-8\")).hexdigest()"
+
+[[mutant]]
+name = "any_tool_prompt_composes_a_session"
+why = "A subagent's prompt never opens a session; treating every prompt input as one would drop the author's own words that happen to match."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if name.endswith(suffix) and isinstance(prompt, str):"
+replace = "                        if isinstance(prompt, str):"
+
+[[mutant]]
+name = "spawn_tool_matched_by_exact_name"
+why = "The MCP server prefix differs between installations, so an exact name misses the same tool elsewhere."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if name.endswith(suffix) and isinstance(prompt, str):"
+replace = "                        if name == suffix and isinstance(prompt, str):"
+
+[[mutant]]
+name = "spawned_prompt_quoting_a_marker_drops_the_session"
+why = "A prompt the model wrote about a scheduled job is not a scheduled run; the marker test reads the author's text."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if (text and not spawned and any(\n"
+replace = "                    if (text and any(\n"
+
+[[mutant]]
+name = "spawned_prompt_counted_before_the_flags"
+why = "A flagged record is reported once, as flagged, whatever else it matches."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if rec.get(\"isCompactSummary\"):\n                        _count(tally, \"compact_summaries\")"
+replace = "                    if spawned:\n                        _count(tally, \"spawned_prompts\")\n                        continue\n                    if rec.get(\"isCompactSummary\"):\n                        _count(tally, \"compact_summaries\")"

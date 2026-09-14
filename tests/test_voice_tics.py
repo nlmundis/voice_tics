@@ -464,6 +464,102 @@ class ReadTurnsTest(unittest.TestCase):
         stats = self._stats([_rec("assistant", "API Error: 500", model="m")])
         self.assertEqual(stats.get("noise_records"), 1)
 
+    PROMPT = ("Fix the stale README badge in the widgets repo. The badge "
+              "still points at the retired CI service; point it at the "
+              "current workflow and keep the link text.")
+
+    def _spawn(self, prompt: str, tool: str = "mcp__ccd_session__spawn_task",
+               ts: str = "2026-08-12T09:00:00.000Z") -> str:
+        """An assistant record whose tool call hands a prompt to a session."""
+        return _rec("assistant", "", model="m", ts=ts, blocks=[
+            {"type": "text", "text": "Not a job for spawn_task, so doing it here."},
+            {"type": "tool_use", "name": tool, "input": {"prompt": prompt}}])
+
+    def _parent_and_child(self, child: List[str],
+                          parent_tool: str = "mcp__ccd_session__spawn_task",
+                          **kwargs: Any) -> Dict[str, int]:
+        parent = _session([_rec("user", "tidy up what you find"),
+                           self._spawn(self.PROMPT, parent_tool)],
+                          self.tmp, "parent.jsonl")
+        spawned = _session(child, self.tmp, "child.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent, spawned], stats=stats,
+                                        **kwargs))
+        return stats
+
+    def _user_texts(self) -> List[str]:
+        return [t.text for t in self.turns if t.role == "user"]
+
+    def test_a_prompt_written_for_a_spawned_session_is_not_yours(self) -> None:
+        """The harness opens the spawned session with the model's prompt as
+        an unflagged user record; wrapped differently, it is the same text."""
+        rewrapped = self.PROMPT.replace(" The badge ", "\n\nThe badge  ")
+        stats = self._parent_and_child([_rec("user", rewrapped),
+                                        _rec("assistant", "On it.", model="m")])
+        self.assertEqual(self._user_texts(), ["tidy up what you find"])
+        self.assertIn("On it.", [t.text for t in self.turns])
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+
+    def test_a_reminder_beside_a_spawned_prompt_does_not_hide_it(self) -> None:
+        stats = self._parent_and_child([_rec(
+            "user", self.PROMPT
+            + "\n<system-reminder>worktree notice</system-reminder>")])
+        self.assertEqual(self._user_texts(), ["tidy up what you find"])
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+
+    def test_the_same_words_with_no_spawn_call_are_the_authors(self) -> None:
+        path = _session([_rec("user", self.PROMPT)], self.tmp, "alone.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([path], stats=stats))
+        self.assertEqual(len(self._user_texts()), 1)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_prompt_with_words_added_is_the_authors(self) -> None:
+        stats = self._parent_and_child(
+            [_rec("user", self.PROMPT + " Also bump the version.")])
+        self.assertEqual(len(self._user_texts()), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_only_listed_tools_compose_a_prompt(self) -> None:
+        """A subagent's prompt never opens a session of its own, so the same
+        text typed as a user record is still the author's."""
+        stats = self._parent_and_child([_rec("user", self.PROMPT)],
+                                       parent_tool="Agent")
+        self.assertEqual(len(self._user_texts()), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_spawned_prompt_quoting_a_marker_keeps_the_session(self) -> None:
+        quoting = ("Check why This is a scheduled task. appears in the log "
+                   "output of the nightly job.")
+        parent = _session([self._spawn(quoting)], self.tmp, "parent.jsonl")
+        child = _session([_rec("user", quoting),
+                          _rec("assistant", "Checking.", model="m")],
+                         self.tmp, "child.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent, child], stats=stats))
+        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+        self.assertIn("Checking.", [t.text for t in self.turns])
+
+    def test_a_flagged_record_matching_a_prompt_counts_as_flagged(self) -> None:
+        stats = self._parent_and_child([_rec("user", self.PROMPT, meta=True)])
+        self.assertEqual(stats.get("meta_records"), 1)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_spawned_prompt_before_the_window_is_not_counted(self) -> None:
+        stats = self._parent_and_child(
+            [_rec("user", self.PROMPT, ts="2026-01-01T10:00:00.000Z")],
+            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc))
+        self.assertNotIn("spawned_prompts", stats)
+        self.assertEqual(self._user_texts(), ["tidy up what you find"])
+
+    def test_a_spawned_session_read_alone_keeps_its_prompt(self) -> None:
+        """The documented limit: only prompts whose parent transcript is read
+        can be recognised."""
+        child = _session([_rec("user", self.PROMPT)], self.tmp, "child.jsonl")
+        self.assertEqual(vt.composed_prompts([child]), set())
+        self.assertEqual(len(list(vt.read_turns([child]))), 1)
+
     def test_a_harness_notice_in_a_user_record_is_counted(self) -> None:
         stats = self._stats([_rec("user", "<task-notification>done"
                                           "</task-notification>"),
@@ -592,7 +688,7 @@ class ReadTurnsTest(unittest.TestCase):
         counts = {"meta_records": 11, "compact_summaries": 12,
                   "cross_session_messages": 13, "synthetic_records": 14,
                   "noise_records": 15, "sidechain_records": 16,
-                  "model_filtered": 17}
+                  "model_filtered": 17, "spawned_prompts": 18}
         report = vt.render(mine, theirs, [], structures, 0, False,
                            stats={"sessions": 1, **counts})
         line = next(l for l in report.splitlines()
@@ -600,7 +696,8 @@ class ReadTurnsTest(unittest.TestCase):
         for phrase in ("11 harness-composed (isMeta)", "12 compaction summaries",
                        "13 with cross-session messages cut out",
                        "14 synthetic", "15 harness notices", "16 subagent",
-                       "17 other-model"):
+                       "17 other-model",
+                       "18 spawned-session prompts a model wrote"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, line)
 

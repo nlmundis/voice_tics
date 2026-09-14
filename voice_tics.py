@@ -76,11 +76,13 @@ import collections
 import dataclasses
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
 import sys
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import (IO, Dict, Iterable, Iterator, List, Optional, Sequence, Set,
+                    Tuple)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -194,6 +196,18 @@ CROSS_SESSION_RE = re.compile(
     re.DOTALL)
 CROSS_SESSION_OPEN = '<cross-session-message from="'
 CROSS_SESSION_CLOSE = "</cross-session-message>"
+
+# Tools whose text input the harness delivers, unchanged and unflagged, as the
+# first USER record of another session: (tool-name suffix, input field). A
+# model calls spawn_task with a prompt it wrote, you launch the session with
+# one click, and that prompt then opens the session as if you had typed it.
+# Found 2026-09-14 on the reference author's transcripts: 39 records in a
+# 45-day window, each exactly equal to a spawn_task prompt once system
+# reminders were cut, about a quarter of the words then left as the author's.
+# Messages sent between sessions are not listed: they arrive tagged, and are
+# handled at ``CROSS_SESSION_RE``. Matched by name suffix, since the MCP
+# server prefix differs between installations.
+COMPOSED_PROMPT_TOOLS: Tuple[Tuple[str, str], ...] = (("spawn_task", "prompt"),)
 
 # Boilerplate carried by every scheduled-task prompt. A scheduled run logs its
 # prompt as a user record, so without this the automation's own wording is
@@ -489,6 +503,69 @@ def _parse_when(rec: dict) -> Optional[dt.datetime]:
     return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
 
 
+def _open_transcript(path: str) -> Optional[IO[str]]:
+    """A transcript opened for reading, or None when it cannot be opened.
+
+    Undecodable bytes are replaced rather than raised: one bad byte in one
+    transcript would otherwise raise out of the generator and cost every
+    other session.
+    """
+    try:
+        return open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _prompt_key(text: str) -> str:
+    """A fingerprint of prose that ignores how whitespace was wrapped."""
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()
+
+
+def composed_prompts(paths: Sequence[str]) -> Set[str]:
+    """Fingerprints of every prompt a model wrote for another session to open.
+
+    Read from the assistant records of ``paths``: each tool_use whose name
+    ends with a ``COMPOSED_PROMPT_TOOLS`` suffix contributes its input field.
+    Only prompts whose parent transcript is among ``paths`` can be found, so
+    a spawned session read without its parent still counts that prompt as
+    yours. A line that cannot carry such a call is not parsed at all.
+    """
+    suffixes = tuple(name for name, _ in COMPOSED_PROMPT_TOOLS)
+    found: Set[str] = set()
+    for path in paths:
+        fh = _open_transcript(path)
+        if fh is None:
+            continue
+        with fh:
+            for line in fh:
+                if not any(s in line for s in suffixes):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                    continue
+                message = rec.get("message")
+                content = (message.get("content")
+                           if isinstance(message, dict) else None)
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if (not isinstance(block, dict)
+                            or block.get("type") != "tool_use"):
+                        continue
+                    name = block.get("name")
+                    given = block.get("input")
+                    if not isinstance(name, str) or not isinstance(given, dict):
+                        continue
+                    for suffix, field in COMPOSED_PROMPT_TOOLS:
+                        prompt = given.get(field)
+                        if name.endswith(suffix) and isinstance(prompt, str):
+                            found.add(_prompt_key(prompt))
+    return found
+
+
 def read_turns(paths: Sequence[str],
                since: Optional[dt.datetime] = None,
                stats: Optional[Dict[str, int]] = None,
@@ -503,7 +580,10 @@ def read_turns(paths: Sequence[str],
     Assistant records whose ``message.model`` is ``<synthetic>`` are always
     dropped: those are harness-composed stand-ins, not any model's prose.
     User records flagged ``isCompactSummary`` are dropped too: the harness
-    stores the model's compaction summary as a user record.
+    stores the model's compaction summary as a user record. So is an unflagged
+    user record whose prose is exactly a prompt a model wrote for a spawned
+    session (see ``composed_prompts``), which costs one extra read of
+    ``paths`` to find those prompts.
 
     Args:
         paths: Session .jsonl paths. One file is one session, which is what
@@ -512,7 +592,8 @@ def read_turns(paths: Sequence[str],
         stats: Optional counter dict, updated in place with
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``compact_summaries``/
-            ``cross_session_messages``/``synthetic_records``/
+            ``cross_session_messages``/``spawned_prompts``/
+            ``synthetic_records``/
             ``sidechain_records``/``model_filtered``/``noise_records``) so the
             caller can report what was excluded instead of excluding it
             silently. An exclusion counter counts only records the scan
@@ -528,6 +609,7 @@ def read_turns(paths: Sequence[str],
     Yields:
         One ``Turn`` per authored message, prose already scrubbed.
     """
+    composed = composed_prompts(paths)
     for path in paths:
         session = os.path.basename(path)[:8]
         buffered: List[Turn] = []
@@ -538,9 +620,8 @@ def read_turns(paths: Sequence[str],
         # True until the first assistant prose after something you sent, so
         # the opener table counts responses rather than records.
         opens = True
-        try:
-            fh = open(path, encoding="utf-8", errors="replace")
-        except OSError:
+        fh = _open_transcript(path)
+        if fh is None:
             continue
         with fh:
             for line in fh:
@@ -590,16 +671,22 @@ def read_turns(paths: Sequence[str],
                     if not _is_tool_result(content):
                         opens = True
                     text, withheld = _user_prose(content)
+                    # A model wrote this prompt for the session it opens. It
+                    # is counted after the flags below, so a flagged record is
+                    # reported as flagged.
+                    spawned = text is not None and _prompt_key(text) in composed
                     # The session test runs BEFORE the date cutoff and before
                     # isMeta, so neither can hide the one record that marks a
                     # scheduled run: a --days cutoff falling after the prompt
                     # re-admitted the rest of that session, and the report
                     # then said nothing had been dropped. It tests your text
                     # after cross-session messages are cut out, so another
-                    # session quoting a marker does not drop yours. A record
-                    # dropped for a leftover tag is not tested at all: its
-                    # text cannot be told apart from the other session's.
-                    if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
+                    # session quoting a marker does not drop yours, and nor
+                    # does a spawned prompt quoting one. A record dropped for a
+                    # leftover tag is not tested at all: its text cannot be
+                    # told apart from the other session's.
+                    if (text and not spawned and any(
+                            m in text for m in AUTOMATED_SESSION_MARKERS)):
                         automated = True
                         break
                     # isCompactSummary marks the summary Claude Code writes
@@ -626,6 +713,9 @@ def read_turns(paths: Sequence[str],
                     # once, as flagged.
                     if rec.get("isMeta"):
                         _count(tally, "meta_records")
+                        continue
+                    if spawned:
+                        _count(tally, "spawned_prompts")
                         continue
                     if withheld == "cross_session":
                         _count(tally, "cross_session_messages")
@@ -1337,6 +1427,8 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"summaries, "
                    f"{stats.get('cross_session_messages', 0):,} with "
                    f"cross-session messages cut out or the record dropped, "
+                   f"{stats.get('spawned_prompts', 0):,} spawned-session "
+                   f"prompts a model wrote, "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('sidechain_records', 0):,} subagent, "
