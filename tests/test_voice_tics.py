@@ -79,12 +79,17 @@ def _rec(kind: str, text: str, *, sidechain: bool = False,
 def _replayed(line: str) -> str:
     """A copy of a transcript line as a resume writes it back into the file.
 
-    The uuid, timestamp and message stay the original's; ``slug`` and ``cwd``
-    are set to what they were at resume time, as observed in real replays.
+    The uuid, timestamp and message stay the original's. The fields observed
+    to differ in real replays are rewritten: ``slug`` and ``cwd`` to their
+    resume-time values, and ``parentUuid``, ``promptId`` and
+    ``toolUseResult``, which a replay re-links or re-records.
     """
     rec = json.loads(line)
     rec["slug"] = "serialized-swinging-flute"
     rec["cwd"] = "/resumed/from/here"
+    rec["parentUuid"] = "relinked-on-resume"
+    rec["promptId"] = "prompt-after-resume"
+    rec["toolUseResult"] = {"rerecorded": True}
     return json.dumps(rec)
 
 
@@ -597,11 +602,14 @@ class ReadTurnsTest(unittest.TestCase):
 
     def test_a_dropped_scheduled_run_is_not_counted_twice(self) -> None:
         """Its records are reported as one automated session, not also as
-        exclusions."""
-        stats = self._stats([_rec("user", "x", meta=True),
+        exclusions, copies included."""
+        earlier = _rec("user", "earlier words", uuid="u5")
+        stats = self._stats([_rec("user", "x", meta=True), earlier,
+                             _replayed(earlier),
                              _rec("user", "This is a scheduled task. Go.")])
         self.assertEqual(stats.get("automated_sessions"), 1)
         self.assertNotIn("meta_records", stats)
+        self.assertNotIn("replayed_records", stats)
 
     def test_the_report_names_every_exclusion_counter(self) -> None:
         mine, theirs = vt.Corpus("m"), vt.Corpus("t")
@@ -698,6 +706,42 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual([t.text for t in self.turns],
                          ["First draft.", "Second draft."])
         self.assertNotIn("replayed_records", stats)
+
+    def test_the_same_message_under_a_new_uuid_is_kept(self) -> None:
+        """The same words sent again get a new uuid; only a copy keeps its
+        original's, so both halves of the key are needed."""
+        stats = self._stats([_rec("user", "go on", uuid="u1"),
+                             _rec("user", "go on", uuid="u2")])
+        self.assertEqual([t.text for t in self.turns], ["go on", "go on"])
+        self.assertNotIn("replayed_records", stats)
+
+    def test_a_copy_with_no_text_is_dropped_but_not_counted(self) -> None:
+        """A copy of a tool call, tool result or thinking block was never a
+        turn, so counting it overstated what the dedupe removed."""
+        prompt = _rec("user", "run the tests", uuid="u1")
+        call = _rec("assistant", "", uuid="a1", blocks=[
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}])
+        result = _rec("user", "", uuid="u2", blocks=[
+            {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}])
+        thinking = _rec("assistant", "", uuid="a2", blocks=[
+            {"type": "thinking", "thinking": "weighing it"}])
+        reply = _rec("assistant", "All green.", uuid="a3")
+        records = [prompt, call, result, thinking, reply]
+        stats = self._stats(records + [_replayed(r) for r in records])
+        self.assertEqual([t.text for t in self.turns],
+                         ["run the tests", "All green."])
+        self.assertEqual(stats.get("replayed_records"), 2)
+
+    def test_a_copied_prompt_does_not_mark_the_next_reply_an_opener(self) -> None:
+        """The opener table counts responses to something you sent; a copy
+        of a prompt was not sent again."""
+        prompt = _rec("user", "fix the parser", uuid="u1")
+        self._stats([prompt, _rec("assistant", "Fixed.", uuid="a1"),
+                     _replayed(prompt),
+                     _rec("assistant", "Also added a test.", uuid="a2")])
+        self.assertEqual([(t.role, t.opens) for t in self.turns],
+                         [("user", True), ("assistant", True),
+                          ("assistant", False)])
 
     def test_the_same_record_in_two_transcripts_is_kept_in_each(self) -> None:
         line = _rec("user", "the same words", uuid="u1")

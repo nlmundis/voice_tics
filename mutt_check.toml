@@ -1116,8 +1116,8 @@ name = "replayed_copy_read_again"
 why = "A record written again later in its transcript was read as new, so every turn in a resumed run was held twice: 175 kept turns in one 45-day window."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                    if key in seen:\n                        _count(tally, \"replayed_records\")"
-replace = "                    if False:\n                        _count(tally, \"replayed_records\")"
+find = "                    if key in seen:\n                        if _carries_text(kind, rec.get(\"message\")):"
+replace = "                    if False:\n                        if _carries_text(kind, rec.get(\"message\")):"
 
 [[mutant]]
 name = "record_without_uuid_collapsed"
@@ -1152,19 +1152,19 @@ replace = "    seen: Set[Tuple[str, str]] = set()\n    for path in paths:\n     
 
 [[mutant]]
 name = "copies_dropped_uncounted"
-why = "Every other exclusion is reported; 1,132 copies dropped with no counter would be an exclusion nobody can see."
+why = "Every other exclusion is reported; 180 copies with text dropped in one 45-day window with no counter would be an exclusion nobody can see."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                        _count(tally, \"replayed_records\")"
-replace = "                        pass"
+find = "                            _count(tally, \"replayed_records\")"
+replace = "                            pass"
 
 [[mutant]]
 name = "copies_counted_outside_the_window"
 why = "Under --days a copy the date cutoff drops anyway was never in the window, so counting it overstates what the dedupe removed."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                        _count(tally, \"replayed_records\")"
-replace = "                        _count(excluded, \"replayed_records\")"
+find = "                            _count(tally, \"replayed_records\")"
+replace = "                            _count(excluded, \"replayed_records\")"
 
 [[mutant]]
 name = "copy_tested_after_its_originals_exclusion"
@@ -1173,13 +1173,13 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 
 [[mutant.edit]]
 file = "voice_tics.py"
-find = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if rec.get(\"isSidechain\"):"
+find = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        if _carries_text(kind, rec.get(\"message\")):\n                            _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if rec.get(\"isSidechain\"):"
 replace = "                if rec.get(\"isSidechain\"):"
 
 [[mutant.edit]]
 file = "voice_tics.py"
 find = "                if not in_window:\n                    if kind == \"assistant\" and text:"
-replace = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if not in_window:\n                    if kind == \"assistant\" and text:"
+replace = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        if _carries_text(kind, rec.get(\"message\")):\n                            _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if not in_window:\n                    if kind == \"assistant\" and text:"
 
 [[mutant]]
 name = "key_recorded_before_the_record_is_admitted"
@@ -1191,7 +1191,7 @@ replace = "                kind = rec.get(\"type\")\n                if kind not
 
 [[mutant]]
 name = "lone_surrogate_ends_the_scan"
-why = "JSON can escape half a surrogate pair, and strict UTF-8 raises on it; one such message would end the scan of every later transcript."
+why = "JSON can escape half a surrogate pair, and strict UTF-8 raises on it; one such message would abort the whole run with no report."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "blob.encode(\"utf-8\", \"surrogatepass\")"
@@ -1204,3 +1204,35 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "                   f\"{stats.get('replayed_records', 0):,} copies of an \""
 replace = "                   f\"\""
+
+[[mutant]]
+name = "textless_copies_counted"
+why = "Counting copies of tool calls, tool results and thinking blocks reported 1,132 copies in one 45-day window where 180 carried text and 175 were turns."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if _carries_text(kind, rec.get(\"message\")):"
+replace = "                        if True:"
+
+[[mutant]]
+name = "copies_keyed_on_the_message_alone"
+why = "The same words sent again get a new uuid; keying on the message alone would drop a prompt typed twice."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return uuid, hashlib.sha256(blob.encode(\"utf-8\", \"surrogatepass\")).hexdigest()"
+replace = "    return \"\", hashlib.sha256(blob.encode(\"utf-8\", \"surrogatepass\")).hexdigest()"
+
+[[mutant]]
+name = "relinked_parent_pulled_into_the_key"
+why = "A replay re-links parentUuid; a key that includes it misses every copy it exists to catch."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    blob = json.dumps(rec.get(\"message\"), sort_keys=True, ensure_ascii=False,"
+replace = "    blob = json.dumps([rec.get(\"message\"), rec.get(\"parentUuid\")], sort_keys=True, ensure_ascii=False,"
+
+[[mutant]]
+name = "copied_prompt_marks_the_next_reply_an_opener"
+why = "The opener table counts responses to something sent; a copied prompt was not sent again."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if key in seen:\n                        if _carries_text(kind, rec.get(\"message\")):"
+replace = "                    if key in seen:\n                        if kind == \"user\" and not _is_tool_result((rec.get(\"message\") or {}).get(\"content\")):\n                            opens = True\n                        if _carries_text(kind, rec.get(\"message\")):"

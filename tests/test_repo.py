@@ -225,7 +225,14 @@ class MutationSpecTest(unittest.TestCase):
         ``[[mutant.edit]]`` list, which a decision spanning two places in a
         file needs.
         """
-        return mutant.get("edit") or [mutant]
+        inline = [k for k in ("file", "find", "replace") if k in mutant]
+        if "edit" in mutant:
+            if inline or not mutant["edit"]:
+                raise AssertionError(
+                    f"{mutant['name']}: an edit list must be non-empty and "
+                    f"stand alone, not beside {inline}; mutt_check refuses it")
+            return mutant["edit"]
+        return [mutant]
 
     def test_every_mutant_names_a_file_that_exists(self) -> None:
         for mutant in self._spec()["mutant"]:

@@ -521,6 +521,22 @@ def _replay_key(rec: dict) -> Optional[Tuple[str, str]]:
     return uuid, hashlib.sha256(blob.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def _carries_text(kind: object, message: object) -> bool:
+    """Whether a record carries text a turn could be read from.
+
+    A user record does unless it is a tool round-trip; an assistant record
+    does when it has a non-blank text block. A record that is only a tool
+    call, a tool result or a thinking block never became a turn, so a copy of
+    one removes nothing from either corpus.
+    """
+    content = message.get("content") if isinstance(message, dict) else None
+    if kind == "assistant":
+        return _has_text(content)
+    if isinstance(content, str):
+        return bool(content.strip())
+    return not _is_tool_result(content) and _has_text(content)
+
+
 def read_turns(paths: Sequence[str],
                since: Optional[dt.datetime] = None,
                stats: Optional[Dict[str, int]] = None,
@@ -607,19 +623,24 @@ def read_turns(paths: Sequence[str],
                 # date cutoff drops anyway, which would report an exclusion
                 # the window never contained.
                 tally = excluded if in_window else None
-                # A copy of an earlier record is dropped before any other
+                # A copy of an earlier record is dropped before any exclusion
                 # test, so it is counted once, here, rather than again under
                 # its original's exclusion, and it cannot move ``opens``.
-                # Measured 2026-09-14 over a snapshot of 563 transcripts: 721
-                # assistant and 447 user records were such copies, in 4
-                # files, and no copy differed from its original in type,
+                # Measured 2026-09-14 over a snapshot of 563 transcripts, all
+                # dates: 721 assistant and 447 user records were such copies,
+                # in 4 files, and no copy differed from its original in type,
                 # timestamp or any flag tested below. The key is recorded
                 # here, once the record is admitted as a user or assistant
-                # record, so a line of another type cannot hide one.
+                # record, so a line of another type cannot hide one. A copy
+                # is counted only when it carries text (see _carries_text): in
+                # the 45-day window ending 2026-09-13, 1,132 copies were
+                # dropped and 180 carried text, 175 of them kept turns, 4
+                # harness notices and 1 isMeta record.
                 key = _replay_key(rec)
                 if key is not None:
                     if key in seen:
-                        _count(tally, "replayed_records")
+                        if _carries_text(kind, rec.get("message")):
+                            _count(tally, "replayed_records")
                         continue
                     seen.add(key)
                 if rec.get("isSidechain"):
