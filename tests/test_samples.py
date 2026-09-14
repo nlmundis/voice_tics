@@ -178,7 +178,8 @@ class ContaminationWarningTest(unittest.TestCase):
         self.assertIsNone(vt.contamination_warning(structures, mine, theirs))
 
     def test_structures_only_the_baseline_uses_are_not_comparable(self) -> None:
-        """A zero on the MODEL side must be excluded, not scored as 0.0x.
+        """A zero on the MODEL side must be excluded, not scored as a zero
+        ratio.
 
         Counting it would drag the parity share down and silence the guard on
         a corpus that genuinely is contaminated. The mirror case (zero on the

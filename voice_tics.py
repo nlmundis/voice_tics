@@ -177,6 +177,19 @@ USER_NOISE_MARKERS = (
     "tool_use_error",
 )
 
+# A message one session's model sent to another. The harness delivers it as a
+# USER record in the receiving session, with no flag, so counted as your prose
+# it put the model on both sides of every ratio. Found 2026-09-14: in the
+# reference author's 45-day window, ten such records survived every other
+# filter. Cut out like a system reminder, so anything typed beside one is
+# kept, and keyed on the ``from`` attribute the harness always writes, so a
+# tag you type while discussing the harness does not match. An unclosed one
+# drops the record, as an unclosed reminder does.
+CROSS_SESSION_RE = re.compile(
+    r'<cross-session-message from="[^"]*"[^>]*>.*?</cross-session-message>',
+    re.DOTALL)
+CROSS_SESSION_OPEN = '<cross-session-message from="'
+
 # Boilerplate carried by every scheduled-task prompt. A scheduled run logs its
 # prompt as a user record, so without this the automation's own wording is
 # scored as your voice: the first run of the baseline direction ranked
@@ -371,7 +384,18 @@ class Turn:
 
 
 def _user_text(content: object) -> Optional[str]:
-    """Prose you actually typed, or None for harness-generated records.
+    """Prose you actually typed, or None; ``_user_prose`` without the reason."""
+    return _user_prose(content)[0]
+
+
+def _user_prose(content: object) -> Tuple[Optional[str], str]:
+    """Prose you actually typed, and what was withheld from it.
+
+    Returns ``(text, withheld)``. ``text`` is None when nothing of yours is
+    left. ``withheld`` is ``"cross_session"`` when a message from another
+    session was cut out (whether or not text of yours remains beside it),
+    ``"notice"`` when the record is harness output, and ``""`` otherwise, so
+    the caller can count what it dropped rather than dropping it silently.
 
     A user record may be a bare string or a block list. A record carrying a
     tool_result block is a tool round-trip, machine output end to end, so it
@@ -384,7 +408,8 @@ def _user_text(content: object) -> Optional[str]:
     appends them to the record that holds your prompt, so each closed
     ``<system-reminder>`` span is cut out and what remains is judged on its
     own. An unclosed one still drops the record, because the rest of it cannot
-    be told apart from the reminder.
+    be told apart from the reminder. Cross-session messages are cut out the
+    same way, for the reason given at ``CROSS_SESSION_RE``.
     """
     if isinstance(content, str):
         raw = content
@@ -394,18 +419,24 @@ def _user_text(content: object) -> Optional[str]:
             if not isinstance(b, dict):
                 continue
             if b.get("type") == "tool_result":
-                return None
+                return None, ""
             if b.get("type") == "text":
                 parts.append(b.get("text") or "")
         raw = "\n".join(parts)
     else:
-        return None
+        return None, ""
     raw = SYSTEM_REMINDER_RE.sub("\n", raw)
+    withheld = ""
+    if CROSS_SESSION_OPEN in raw:
+        withheld = "cross_session"
+        raw = CROSS_SESSION_RE.sub("\n", raw)
+        if CROSS_SESSION_OPEN in raw:
+            return None, withheld
     if not raw.strip():
-        return None
+        return None, withheld
     if any(marker in raw for marker in USER_NOISE_MARKERS):
-        return None
-    return raw
+        return None, withheld or "notice"
+    return raw, withheld
 
 
 def _is_tool_result(content: object) -> bool:
@@ -474,9 +505,13 @@ def read_turns(paths: Sequence[str],
         stats: Optional counter dict, updated in place with
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``compact_summaries``/
-            ``synthetic_records``/``model_filtered``/``noise_records``) so the
+            ``cross_session_messages``/``synthetic_records``/
+            ``sidechain_records``/``model_filtered``/``noise_records``) so the
             caller can report what was excluded instead of excluding it
-            silently.
+            silently. An exclusion counter counts only records the scan
+            would otherwise have kept: inside ``since`` and in a session
+            that was not dropped whole as a scheduled run, whose records the
+            ``automated_sessions`` count already reports.
         model: Substring an assistant record's ``message.model`` must contain,
             or None for all models. Without it every figure downstream is a
             blend across every model that ever wrote a transcript here, not
@@ -489,6 +524,9 @@ def read_turns(paths: Sequence[str],
     for path in paths:
         session = os.path.basename(path)[:8]
         buffered: List[Turn] = []
+        # Exclusions in this session, merged into stats only if the session
+        # is kept, so a dropped scheduled run is not reported twice.
+        excluded: Dict[str, int] = {}
         automated = False
         # True until the first assistant prose after something you sent, so
         # the opener table counts responses rather than records.
@@ -514,29 +552,37 @@ def read_turns(paths: Sequence[str],
                 kind = rec.get("type")
                 if kind not in ("user", "assistant"):
                     continue
+                when = _parse_when(rec)
+                in_window = since is None or when is None or when >= since
+                # Where an exclusion is counted: nowhere for a record the
+                # date cutoff drops anyway, which would report an exclusion
+                # the window never contained.
+                tally = excluded if in_window else None
                 if rec.get("isSidechain"):
+                    _count(tally, "sidechain_records")
                     continue
                 message = rec.get("message")
                 if not isinstance(message, dict):
                     message = {}
                 content = message.get("content")
+                withheld = ""
                 if kind == "assistant":
                     rec_model = message.get("model") or ""
                     if not isinstance(rec_model, str):
                         rec_model = ""
                     if rec_model == "<synthetic>":
-                        _count(stats, "synthetic_records")
+                        _count(tally, "synthetic_records")
                         continue
                     if model is not None and model not in rec_model:
-                        _count(stats, "model_filtered")
+                        _count(tally, "model_filtered")
                         continue
                     text = _assistant_text(content)
                     if text is None and _has_text(content):
-                        _count(stats, "noise_records")
+                        _count(tally, "noise_records")
                 else:
                     if not _is_tool_result(content):
                         opens = True
-                    text = _user_text(content)
+                    text, withheld = _user_prose(content)
                     # The session test runs BEFORE the date cutoff and before
                     # isMeta, so neither can hide the one record that marks a
                     # scheduled run: a --days cutoff falling after the prompt
@@ -551,13 +597,11 @@ def read_turns(paths: Sequence[str],
                     # prose it put the model on both sides of every ratio.
                     # Found 2026-09-13: in a 45-day window, 29 summaries held
                     # half the baseline's words and nine in ten of its em
-                    # dashes, and dropping them moved the em dash row further
-                    # than any other. The counter, like meta_records, counts
-                    # every summary dropped, inside the date window or not.
-                    # The session test above still sees a summary, so one that
-                    # carries a scheduled-run marker still drops its session.
+                    # dashes. The session test above still sees a summary,
+                    # so one that carries a scheduled-run marker still drops
+                    # its session.
                     if rec.get("isCompactSummary"):
-                        _count(stats, "compact_summaries")
+                        _count(tally, "compact_summaries")
                         continue
                     # isMeta marks a user record the harness composed rather
                     # than you: slash-command expansions and similar. It is
@@ -565,16 +609,18 @@ def read_turns(paths: Sequence[str],
                     # your baseline by word count (120,755 words down to
                     # 54,688) -- and it compressed every ratio toward 1
                     # because so much of "his" corpus was machine text.
-                    # Dropping it moved appositive_negation from parity to
-                    # clearly model-heavy, which is the difference between
-                    # contradicting your own observation about your writing
-                    # and confirming it. Counted before the noise filter, so
-                    # every isMeta record dropped is a record reported.
+                    # Counted before any test of the text, so an isMeta record
+                    # carrying harness markup is still reported, and before
+                    # the cross-session and notice counters, so it is reported
+                    # once, as flagged.
                     if rec.get("isMeta"):
-                        _count(stats, "meta_records")
+                        _count(tally, "meta_records")
                         continue
-                when = _parse_when(rec)
-                if since is not None and when is not None and when < since:
+                    if withheld == "cross_session":
+                        _count(tally, "cross_session_messages")
+                    elif withheld == "notice":
+                        _count(tally, "noise_records")
+                if not in_window:
                     if kind == "assistant" and text:
                         opens = False
                     continue
@@ -593,6 +639,9 @@ def read_turns(paths: Sequence[str],
                     stats.get("automated_sessions", 0) + 1)
         if automated:
             continue
+        if stats is not None:
+            for key, n in excluded.items():
+                stats[key] = stats.get(key, 0) + n
         if stats is not None:
             stats["turns"] = stats.get("turns", 0) + len(buffered)
         yield from buffered
@@ -641,10 +690,7 @@ def read_samples(pattern: str,
         matched on is register: instructions typed to an agent are short and
         imperative, so the constructions you reach for in long-form prose
         barely occur, and no threshold over this corpus will ever surface
-        them. Measured once on the reference author's transcripts, the chat
-        side's sentences came out markedly shorter than the model's, on very
-        few baseline words and before the authorship filters existed, so read
-        it as the direction of the gap, not its size.
+        them.
 
         Samples are matched on register and on author, which is what you
         actually want when the thing being linted is a document. What they
@@ -971,8 +1017,8 @@ STRUCTURE_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
         "let_me",
         # Any verb, not a list of them. The first version enumerated
         # check/look/see/start/... and silently missed "let me verify", which
-        # was 158 uses and a top-five tic in its own right -- the detector for
-        # the largest measured habit was undercounting it. Classify positively
+        # was 158 uses on its own -- the detector was undercounting the
+        # habit it exists for. Classify positively
         # and carve out the one different sense: "let me know" is addressed to
         # the reader, not narration of the model's own next move.
         r"\blet\s+me\s+(?!know\b)(?:just\s+)?\w+",
@@ -1278,8 +1324,11 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"harness-composed (isMeta), "
                    f"{stats.get('compact_summaries', 0):,} compaction "
                    f"summaries, "
+                   f"{stats.get('cross_session_messages', 0):,} cross-session "
+                   f"messages, "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
+                   f"{stats.get('sidechain_records', 0):,} subagent, "
                    f"{stats.get('model_filtered', 0):,} other-model.")
     out.append("")
 

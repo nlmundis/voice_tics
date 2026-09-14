@@ -23,22 +23,24 @@ WHAT IS DELIBERATELY ABSENT, AND WHY
       lexicon rule flags the author as readily as the model, and only a
       matched baseline can say which of the two you are.
 
-    * **The chat-register family** ("let me check", "want me to"): the largest
-      measured tics by far, and useless here, because none of them can appear
-      in a document. A document linter carrying them would report clean runs
-      as a property of the register rather than of the prose.
+    * **The chat-register family** ("let me check", "want me to"): useless
+      here, because none of them can appear in a document. A document linter
+      carrying them would report clean runs as a property of the register
+      rather than of the prose.
 
 WHAT FAILS A RUN INSTEAD
     Structures. ``TIC_PROVENANCE`` below records why each default is in its
     tier. Which keys are in force is config; these are the shipped defaults:
 
     * ``method_defence``: defending the method instead of stating the
-      finding. It reaches documents through model drafts rather than through
-      the author's own writing, so flagging it corrects the right author.
+      finding.
     * ``not_x_but_y``: the explicit "it's not A, it's B" reveal.
-    * ``appositive_negation``: a WARNING rather than an error. It is
-      model-heavier but genuinely shared, so an occurrence is a prompt to
-      look, not proof of a draft. ``--strict`` promotes warnings to failures.
+    * ``appositive_negation``: a WARNING rather than an error, so an
+      occurrence is a prompt to look, not proof of a draft. ``--strict``
+      promotes warnings to failures.
+
+    Each was put in its tier on ratios that have since been withdrawn, so
+    the tiers are a starting point, not a finding about who writes what.
 
     A lone em dash is available as a rule and ships OFF. It is one author's
     punctuation preference about LONE dashes, not a measurement of a rate.
@@ -50,7 +52,7 @@ WHAT FAILS A RUN INSTEAD
     you mean to enforce on documents.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
-    Those ratios come from one author and one corpus. Run ``voice_tics.py``
+    The defaults were chosen on one author's corpus. Run ``voice_tics.py``
     against your own transcripts or your own writing, read the STRUCTURES
     table, and set ``[lint] error`` from what separates for YOU. Shipping this
     file's defaults unexamined is the same mistake as shipping a wordlist,
@@ -98,17 +100,15 @@ import voice_tics
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
     "method_defence":
-        "error: defending the method instead of stating the finding reaches "
-        "documents through model drafts; chosen on withdrawn ratios, so "
-        "re-measure before relying on the tier",
+        "error: defending the method instead of stating the finding; chosen "
+        "on withdrawn ratios, so re-measure before relying on the tier",
     "not_x_but_y":
         "error: the explicit reveal template; chosen on withdrawn ratios "
         "that rested on one author use or none, so re-measure before "
         "relying on the tier",
     "appositive_negation":
-        "warning: shared, model-heavier, so a prompt to look rather than an "
-        "error; chosen on withdrawn ratios, so re-measure before relying on "
-        "the tier",
+        "warning: a prompt to look rather than an error; chosen on withdrawn "
+        "ratios, so re-measure before relying on the tier",
 }
 
 EXCERPT_CAP = 60

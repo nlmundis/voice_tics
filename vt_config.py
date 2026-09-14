@@ -81,8 +81,9 @@ DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 # of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 
-# Model-heavier but genuinely shared, so an occurrence is a prompt to look
-# rather than proof of a draft. Warnings never fail a run without --strict.
+# A warning, so an occurrence is a prompt to look rather than proof of a
+# draft; chosen on the same withdrawn ratios. Warnings never fail a run
+# without --strict.
 DEFAULT_WARN_TICS: Tuple[str, ...] = ("appositive_negation",)
 
 TOP_KEYS = frozenset({"corpus", "baseline", "lint", "output"})

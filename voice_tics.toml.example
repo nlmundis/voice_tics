@@ -90,7 +90,7 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 #
 #   method_defence       defending the method instead of stating it
 #   not_x_but_y          the explicit "it's not A, it's B" reveal
-#   appositive_negation  "Y, not X" — shared but model-heavier, so warn
+#   appositive_negation  "Y, not X", a warning
 #
 # Re-measure on your own corpus before trusting them. Run voice_tics.py, read
 # the STRUCTURES table, and promote what separates for YOU.

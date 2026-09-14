@@ -4,7 +4,7 @@ Find the phrases and structures an AI model overuses, by measuring them
 against **your own writing**, not against a list of words somebody decided
 sound robotic.
 
-Then lint documents for the ones that separate for you.
+Then lint documents for the ones your own measurement separates.
 
 ```bash
 python3 voice_tics.py --days 30                 # what does the model repeat?
@@ -49,29 +49,34 @@ it does not decide what a tic is, and it cannot.
 ### Why there is no results table
 
 Earlier versions of this README published ratios measured on the reference
-author's transcripts. They are withdrawn, because every review of them found
-more of the model's own writing counted as the author's.
+author's transcripts. They are withdrawn, because reviews kept finding more of
+the model's own writing counted as the author's.
 
 A transcript records who delivered each message to the session, not who wrote
-it. Claude Code marks two kinds of user record it wrote itself, slash-command
-expansions (`isMeta`) and the summaries it writes when it compacts a
-conversation (`isCompactSummary`), and this tool drops and counts both. It
-cannot see the rest. On the reference author's 45-day window ending
-2026-09-13, with both filters on, close to half of what was left as "the
-author" was still model-written or duplicated: session prompts the model
-drafted and the author launched, messages one session's model sent to another,
-and text repeated at the start of many sessions, including a model-written
-template. Each correction moved the headline ratios, some of them several
-times over.
+it. Claude Code flags two kinds of user record it wrote itself: slash-command
+expansions and similar (`isMeta`), and the summaries it writes when it compacts
+a conversation (`isCompactSummary`). This tool drops both, and drops records it
+recognises by their content too: harness notices, hook output, messages another
+session's model sent, and whole scheduled-run sessions. Whatever it does not
+recognise counts as the author. On the reference author's 45-day window ending
+2026-09-13, after every exclusion the tool makes, about a quarter of what was
+left as "the author" was prompts the model had drafted for sessions the author
+launched, and nearly a fifth more opened with text repeated at the start of
+five or more sessions, which the author may or may not have typed each time.
+Each correction moved the headline ratios, some of them several times over.
 
 So the method stands and the published numbers do not. Measure your own
 corpus, and read a transcript baseline as the most it could be yours, not as
-what is: the report says what it excluded, never what it could not recognise.
-Where you can, use `--baseline-from` on documents you wrote unaided (below).
+what is: the report counts what it recognised as someone else's writing and
+dropped, and cannot count what it did not recognise. Where you can, use
+`--baseline-from` on documents you wrote unaided (below).
 
 Sentence length is **reported and can never fail a run** in `prose_lint`: a
 length threshold measures register, a linter runs on documents, and a chat
-baseline says nothing about the register of your documents. The em-dash rule
+baseline says nothing about the register of your documents. The same objection
+reaches every default rule, since each was chosen on a chat baseline and runs
+on documents; `--baseline-from` is the better test of a rule you mean to
+enforce. The em-dash rule
 ships **off**: it is one author's rule about lone dashes, not a measurement.
 
 ## Two baselines, and what each one costs
@@ -211,14 +216,14 @@ your transcripts.**
   would need a different reader; `read_turns` is the seam.
 - Sample files are read as UTF-8 markdown or plain text. One unreadable file
   is counted and skipped, never fatal.
-- The transcript baseline is only as clean as the harness's own flags.
-  Harness-composed records (`isMeta`) and compaction summaries
-  (`isCompactSummary`) are dropped and counted. A user record the harness
-  does not mark is counted as yours whoever wrote it: a session prompt a model
-  drafted and you launched, a message another session's model sent, a template
-  you run repeatedly, text you pasted. On the reference author's 45-day window
-  ending 2026-09-13, spawned-session prompts and cross-session messages alone
-  were 12,739 of the 46,410 words left after both filters.
+- The transcript baseline is only as clean as the harness's own flags and the
+  markers this tool knows. Records flagged `isMeta` or `isCompactSummary`,
+  harness notices and cross-session messages are dropped and counted. A user
+  record it does not recognise is counted as yours whoever wrote it: a session
+  prompt a model drafted and you launched, a template you run repeatedly, text
+  you pasted. On the reference author's 45-day window ending 2026-09-13,
+  spawned-session prompts alone were 10,643 of the 44,314 author words the
+  report kept.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged
