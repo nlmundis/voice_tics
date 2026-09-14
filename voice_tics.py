@@ -596,7 +596,9 @@ def read_turns(paths: Sequence[str],
                     # re-admitted the rest of that session, and the report
                     # then said nothing had been dropped. It tests your text
                     # after cross-session messages are cut out, so another
-                    # session quoting a marker does not drop yours.
+                    # session quoting a marker does not drop yours. A record
+                    # dropped for a leftover tag is not tested at all: its
+                    # text cannot be told apart from the other session's.
                     if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
                         automated = True
                         break
@@ -1310,8 +1312,8 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
         out.append("inflates both sides. Ratios rank candidates; they do not")
         out.append("convict.")
     else:
-        out.append("Register caveat: your turns are short and directive, the")
-        out.append("model's are long and explanatory, so explanatory")
+        out.append("Register caveat: your turns are typically short and")
+        out.append("directive, the model's longer and explanatory, so explanatory")
         out.append("connectives are over-represented by construction. Ratios")
         out.append("rank candidates; they do not convict.")
     if stats:
@@ -1334,7 +1336,7 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"{stats.get('compact_summaries', 0):,} compaction "
                    f"summaries, "
                    f"{stats.get('cross_session_messages', 0):,} with "
-                   f"cross-session messages cut out, "
+                   f"cross-session messages cut out or the record dropped, "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('sidechain_records', 0):,} subagent, "

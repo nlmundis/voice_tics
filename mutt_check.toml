@@ -716,8 +716,8 @@ name = "ratio_reintroduced_into_readme_prose"
 why = "A withdrawn figure quoted in prose is checked by nothing and reads as a finding."
 suites = ["tests.test_repo.DocsTest"]
 file = "README.md"
-find = "correction moved the headline ratios, some of them several times over."
-replace = "correction moved the headline ratios (em dash 7.7x), some of them several times over."
+find = "each time. Each correction moved the headline ratios, some of them several"
+replace = "each time. Each correction moved the headline ratios (em dash 7.7x), some of them several"
 
 [[mutant]]
 name = "measured_ratio_copied_into_a_docstring"
@@ -874,8 +874,8 @@ name = "comments_in_the_provenance_literal_exempt"
 why = "Only TIC_PROVENANCE's strings are checked by the provenance test; a comment beside them was checked by nothing."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
-find = "             if tok.type == tokenize.STRING and first <= tok.start[0]"
-replace = "             if tok.type in (tokenize.STRING, tokenize.COMMENT) and first <= tok.start[0]"
+find = "        elif tok.type == tokenize.STRING and opened is None and first <= a and b <= last:"
+replace = "        elif tok.type in (tokenize.STRING, tokenize.COMMENT) and opened is None and first <= a and b <= last:"
 
 [[mutant]]
 name = "test_docstrings_left_unscanned"
@@ -914,8 +914,8 @@ name = "spelled_out_multiples_not_ratios"
 why = "The README once stated withdrawn multiples in words; a guard for digits alone misses every one of them."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
-find = "    rf\"|\\b(?:twice|thrice|{_NUMBER_WORDS}[\\s-]+times)\\s+(?:as|more|less|the)\\b\""
-replace = "    rf\"|(?!)(?:twice|thrice|{_NUMBER_WORDS}[\\s-]+times)\\s+(?:as|more|less|the)\\b\""
+find = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
+replace = "    rf\"|(?!){_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
 
 [[mutant]]
 name = "ratio_copied_into_a_test_docstring"
@@ -951,7 +951,7 @@ replace = "                in_window = since is None or (when is not None and wh
 
 [[mutant]]
 name = "non_date_column_among_the_measurements"
-why = "A column with no date between the measured ones is neither recomputed nor rejected, so a share placed there would be published unchecked."
+why = "A non-date column anywhere but first or last is neither recomputed nor rejected, so a share placed there would be published unchecked."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "        elif i != last:"
@@ -986,8 +986,8 @@ name = "gitignored_file_scanned"
 why = "A developer's own untracked config holding any figure failed make check on that machine only."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
-find = "            if name == \".git\" or ignored(name, False):"
-replace = "            if name == \".git\":"
+find = "            if name == \".git\" or ignored(name, False) or os.path.islink(path):"
+replace = "            if name == \".git\" or os.path.islink(path):"
 
 [[mutant]]
 name = "virtual_environment_scanned"
@@ -1010,12 +1010,12 @@ name = "unsupported_gitignore_pattern_read_as_a_name"
 why = "A pattern the walk cannot read would silently scan or skip the wrong files; it must fail instead."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
-find = "        if pattern.startswith(\"!\") or \"/\" in pattern or \"**\" in pattern:"
+find = "        if (pattern.startswith(\"!\") or \"/\" in pattern or \"**\" in pattern\n                or \"\\\\\" in pattern):"
 replace = "        if False:"
 
 [[mutant]]
 name = "stale_allowance_not_reported"
-why = "An allowance whose phrase is gone would let the same number back in anywhere the phrase once was."
+why = "An allowance whose phrase is gone would let that phrase, and its figure, back into the file without review."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "    return copies, sorted(set(allowed) - found)"
@@ -1039,7 +1039,7 @@ replace = "    pass"
 
 [[mutant]]
 name = "missing_provenance_assignment_scans_nothing"
-why = "If TIC_PROVENANCE moves or is renamed, the guard must fail rather than blank the wrong strings or none."
+why = "Two TIC_PROVENANCE assignments would have the guard blank the first one's strings and trust them; the guard must fail instead."
 suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "    if len(assigns) != 1:"
@@ -1052,3 +1052,59 @@ suites = ["tests.test_repo.DocsTest"]
 file = "README.md"
 find = "above). This one is your own list, with no measurement behind it:"
 replace = "above). This one is not chosen by measuring at all, and that is deliberate:"
+
+[[mutant]]
+name = "emphasis_around_a_number_hides_the_ratio"
+why = "Markdown emphasis around the number alone, as in bold digits before an x, read as no ratio at all."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    text = re.sub(r\"(?<!\\w)[*_`]+(?=[\\d.])|(?<=\\d)[*_`]+(?=[x×]|\\W|$)\"\n                  r\"|(?<=[x×])[*_`]+(?=\\W|$)\", \"\", text)"
+replace = "    pass"
+
+[[mutant]]
+name = "ratio_boundaries_ignore_underscores"
+why = "Treating an underscore as a boundary flagged asset names like logo_2x.png as copied ratios."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    r\"(?i)(?<![\\w.%\\\\])\\d*[.,]?\\d+(?:\\s?[x×]|\\s?-?(?:fold|times))(?!\\w)\""
+replace = "    r\"(?i)(?<![A-Za-z0-9.%\\\\])\\d*[.,]?\\d+(?:\\s?[x×]|\\s?-?(?:fold|times))(?![A-Za-z0-9])\""
+
+[[mutant]]
+name = "number_word_times_the_reads_as_a_ratio"
+why = "'several times the build broke' is ordinary prose; only twice and thrice take 'the' as a multiple."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
+replace = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less|the)\\b\""
+
+[[mutant]]
+name = "trailing_spec_comments_unscanned"
+why = "Reading the spec with a TOML parser dropped comments after a value, which the raw-text pass had read."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    parts = re.findall(r\"#[^\\n]*\", _TOML_STRING.sub(\"\", text))"
+replace = "    parts = [line for line in text.splitlines() if line.lstrip().startswith(\"#\")]"
+
+[[mutant]]
+name = "symlinked_file_read"
+why = "git stores a symlink as a link; reading its target scanned text the repo does not publish."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            if name == \".git\" or ignored(name, False) or os.path.islink(path):"
+replace = "            if name == \".git\" or ignored(name, False):"
+
+[[mutant]]
+name = "nested_gitignore_silently_unread"
+why = "A nested .gitignore the walk does not read would let a developer's ignored file fail their build with no hint why."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        if folder != root and \".gitignore\" in files:"
+replace = "        if False:"
+
+[[mutant]]
+name = "provenance_blanked_by_whole_line"
+why = "Blanking every string on the assignment's lines hid a figure in a statement sharing the line."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)"
+replace = "    first, last = offsets[node.lineno - 1], offsets[node.end_lineno]"

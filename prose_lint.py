@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Lint a document for model tics chosen by measuring against a matched baseline.
 
-Every rule here was chosen on ratios measured against a human author on a
-matched corpus, not because it sounds robotic. Those measurements have
-since been withdrawn (see the README: the transcript baseline counted some of
-the model's writing as the author's), so the defaults are a starting point.
-Measure your own before you rely on them.
+Every default structure rule here was chosen on ratios measured against a
+human author on a matched corpus, not because it sounds robotic. Those
+measurements have since been withdrawn (see the README: the transcript
+baseline counted some of the model's writing as the author's), so the defaults
+are a starting point. Measure your own before you rely on them.
 
 WHAT IS DELIBERATELY ABSENT, AND WHY
     * **Any sentence-length or readability threshold.** A length threshold
@@ -46,10 +46,10 @@ WHAT FAILS A RUN INSTEAD
     punctuation preference about LONE dashes, not a measurement of a rate.
     Turn it on if your own measurement and your own style both say so.
 
-    Every rule here, not only a length threshold, was measured against a chat
-    baseline and runs on documents. ``--baseline-from`` in voice_tics.py
-    measures against documents instead, which is the better test of a rule
-    you mean to enforce on documents.
+    Every default structure rule here was measured against a chat baseline and
+    runs on documents, the same objection a length threshold faces.
+    ``--baseline-from`` in voice_tics.py measures against documents instead,
+    which is the better test of a rule you mean to enforce on documents.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     The defaults were chosen on one author's corpus. Run ``voice_tics.py``

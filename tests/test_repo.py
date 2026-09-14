@@ -273,18 +273,16 @@ _NUMBER_WORDS = (r"(?:two|three|four|five|six|seven|eight|nine|ten|eleven"
                  r"|twelve|thirteen|fourteen|fifteen|sixteen|seventeen"
                  r"|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy"
                  r"|eighty|ninety|hundred|thousand|several|many)")
-# A multiple: digits with x, the times sign, fold or times, spaced or
-# hyphenated or not; a number word with fold; twice, thrice or a number word
-# and times, before as, more, less or the; or a power of ten said in words.
-# Markdown emphasis around a number does not hide it. Not shares, which are sizes
-# rather than ratios, and not colon ratios, which nothing here has used.
-# MeasurementBindingTest lists the spellings either way.
+# The spellings of a multiple the copy guard reads as a ratio. Which ones it
+# catches, and which ordinary phrases it must not, are listed in
+# MeasurementBindingTest.test_every_ratio_spelling_is_caught; that test, not
+# this comment, is the record of its reach.
 RATIO = re.compile(
-    r"(?i)(?<![A-Za-z0-9.%\\])\d*[.,]?\d+(?:\s?[x×]|\s?-?(?:fold|times))"
-    r"(?![A-Za-z0-9])"
+    r"(?i)(?<![\w.%\\])\d*[.,]?\d+(?:\s?[x×]|\s?-?(?:fold|times))(?!\w)"
     rf"|\b{_NUMBER_WORDS}-?fold\b"
-    rf"|\b(?:twice|thrice|{_NUMBER_WORDS}[\s-]+times)\s+(?:as|more|less|the)\b"
-    r"|\borders?\s+of\s+magnitude\b")
+    rf"|\b{_NUMBER_WORDS}[\s-]+times\s+(?:as|more|less)\b"
+    r"|\b(?:twice|thrice)\s+(?:as|more|less|the)\b"
+    r"|\borders?[\s-]+of[\s-]+magnitude\b")
 # One measured figure in TIC_PROVENANCE: a ratio, the date it was measured,
 # and the model / author uses behind it.
 PROVENANCE_FIGURE = re.compile(
@@ -450,12 +448,14 @@ def readme_without_recomputed_cells(readme: str) -> str:
 
 
 def _gitignore_patterns(root: str) -> "list[tuple[str, bool]]":
-    """The .gitignore patterns at root, as (glob, folders only).
+    """The root .gitignore's patterns, as (glob, folders only).
 
-    Only the forms this repo uses are understood: a name or glob matched
-    against a file's or folder's own name, with a trailing slash for folders
-    only. Any other form raises, so a pattern the walk would misread fails the
-    suite rather than scanning or skipping the wrong files.
+    Only the simple forms this repo uses are understood: a name or glob
+    matched against a file's or folder's own name, with a trailing slash for
+    folders only. A negation, a path, a double star or an escape raises, so a
+    pattern the walk would misread fails the suite rather than scanning or
+    skipping the wrong files. Nested .gitignore files, .git/info/exclude and
+    global excludes are not read; shipped_files raises on a nested one.
     """
     path = os.path.join(root, ".gitignore")
     if not os.path.isfile(path):
@@ -466,7 +466,8 @@ def _gitignore_patterns(root: str) -> "list[tuple[str, bool]]":
         if not line or line.startswith("#"):
             continue
         pattern = line.rstrip("/")
-        if pattern.startswith("!") or "/" in pattern or "**" in pattern:
+        if (pattern.startswith("!") or "/" in pattern or "**" in pattern
+                or "\\" in pattern):
             raise ValueError(f".gitignore pattern {raw!r} is not a form "
                              "shipped_files understands")
         out.append((pattern, line.endswith("/")))
@@ -479,9 +480,10 @@ def shipped_files(root: str = REPO) -> "list[str]":
     Walked rather than listed, so a new file or folder is read without anyone
     remembering to add it, and chosen by whether it decodes as UTF-8 rather
     than by suffix, so a CHANGELOG or a new example format is read too.
-    Skipped: whatever .gitignore names, since a developer's own config must
-    not fail their build; hidden folders other than .github; caches; and any
-    folder holding a virtual environment.
+    Skipped: what the root .gitignore names (see _gitignore_patterns), since a
+    developer's own config must not fail their build; hidden folders other
+    than .github; caches; any folder holding a virtual environment; and
+    symlinks, which git stores as links rather than as the text they point at.
     """
     patterns = _gitignore_patterns(root)
 
@@ -494,12 +496,16 @@ def shipped_files(root: str = REPO) -> "list[str]":
         dirs[:] = sorted(
             d for d in dirs
             if not ((d.startswith(".") and d != ".github") or d == "__pycache__"
+                    or os.path.islink(os.path.join(folder, d))
                     or os.path.isfile(os.path.join(folder, d, "pyvenv.cfg"))
                     or ignored(d, True)))
+        if folder != root and ".gitignore" in files:
+            raise ValueError(f"nested .gitignore in {os.path.relpath(folder, root)}"
+                             " is not read by shipped_files")
         for name in sorted(files):
-            if name == ".git" or ignored(name, False):
-                continue
             path = os.path.join(folder, name)
+            if name == ".git" or ignored(name, False) or os.path.islink(path):
+                continue
             try:
                 _read(path)
             except (UnicodeDecodeError, OSError):
@@ -513,9 +519,11 @@ def _blank_provenance_strings(source: str) -> str:
 
     provenance_problems checks those strings. A comment beside them, even one
     between two parts of an implicitly joined string, is checked by nothing
-    else, so it stays. The assignment is found by parsing, and a module
-    without exactly one top-level assignment to TIC_PROVENANCE raises rather
-    than blanking the wrong strings or none.
+    else, so it stays, and so does anything sharing a line with the
+    assignment. f-strings count as literals on every Python version. The
+    assignment is found by parsing, and a module without exactly one
+    top-level assignment to TIC_PROVENANCE raises rather than blanking the
+    wrong strings or none.
     """
     assigns = [
         node for node in ast.parse(source).body
@@ -526,15 +534,32 @@ def _blank_provenance_strings(source: str) -> str:
     if len(assigns) != 1:
         raise ValueError("expected one top-level TIC_PROVENANCE assignment, "
                          f"found {len(assigns)}")
-    first, last = assigns[0].lineno, assigns[0].end_lineno
+    lines = source.splitlines(keepends=True)
     offsets = [0]
-    for line in source.splitlines(keepends=True):
+    for line in lines:
         offsets.append(offsets[-1] + len(line))
-    spans = [(offsets[tok.start[0] - 1] + tok.start[1],
-              offsets[tok.end[0] - 1] + tok.end[1])
-             for tok in tokenize.generate_tokens(io.StringIO(source).readline)
-             if tok.type == tokenize.STRING and first <= tok.start[0]
-             and tok.end[0] <= last]
+
+    def at(row: int, byte_col: int) -> int:
+        """ast columns count UTF-8 bytes; tokenize columns count characters."""
+        return offsets[row - 1] + len(lines[row - 1].encode("utf-8")[:byte_col]
+                                      .decode("utf-8", "ignore"))
+
+    node = assigns[0].value
+    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)
+    fstring_start = getattr(tokenize, "FSTRING_START", None)
+    fstring_end = getattr(tokenize, "FSTRING_END", None)
+    spans, opened = [], None
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        a = offsets[tok.start[0] - 1] + tok.start[1]
+        b = offsets[tok.end[0] - 1] + tok.end[1]
+        if tok.type == fstring_start and opened is None:
+            opened = a
+        elif tok.type == fstring_end and opened is not None:
+            a, opened = opened, None
+            if first <= a and b <= last:
+                spans.append((a, b))
+        elif tok.type == tokenize.STRING and opened is None and first <= a and b <= last:
+            spans.append((a, b))
     for a, b in reversed(spans):
         source = source[:a] + " " + source[b:]
     return source
@@ -566,14 +591,20 @@ def _toml_loads(text: str) -> dict:
     return tomllib.loads(text)
 
 
-def _mutation_spec_prose(text: str) -> str:
-    """A mutation spec's claims: its comment lines and every string value
-    except a mutant's find and replace, which are fixtures.
+# A TOML string in any of its four forms, so a '#' inside one is not a comment.
+_TOML_STRING = re.compile(
+    r'"""(?s:.*?)"""' r"|'''(?s:.*?)'''" r'|"(?:[^"\\\n]|\\.)*"' r"|'[^'\n]*'")
 
-    Read with a TOML parser, because a pattern over the raw text cannot tell a
-    find key from a line inside another string.
+
+def _mutation_spec_prose(text: str) -> str:
+    """A mutation spec's claims: its comments, whole-line or trailing, and
+    every string value except a mutant's find and replace, which are fixtures.
+
+    Values are read with a TOML parser, because a pattern over the raw text
+    cannot tell a find key from a line inside another string. Comments are
+    what is left after every string is removed, since the parser drops them.
     """
-    parts = [line for line in text.splitlines() if line.lstrip().startswith("#")]
+    parts = re.findall(r"#[^\n]*", _TOML_STRING.sub("", text))
 
     def strings(value: object, key: "str | None" = None) -> None:
         if isinstance(value, dict):
@@ -592,9 +623,13 @@ def _mutation_spec_prose(text: str) -> str:
 def scanned_text(name: str, text: str) -> str:
     """What the copy guard reads of a shipped file, as one line of prose.
 
-    Comment markers that open a line, and the quotes between implicitly joined
-    string literals, are removed first, so a figure split across lines still
-    reads as one phrase.
+    Before matching: comment markers that open a line are removed, and so are
+    the quotes between two unprefixed string literals that are directly
+    adjacent across a line break, so a figure split that way reads as one
+    phrase (a prefixed literal, or a comment between the parts, still splits
+    it); and Markdown emphasis or code marks touching a number are removed, so
+    emphasis around the number alone does not hide a ratio, while an
+    identifier such as logo_2x stays an identifier.
     """
     if name == "prose_lint.py":
         text = _blank_provenance_strings(text)
@@ -606,6 +641,8 @@ def scanned_text(name: str, text: str) -> str:
         text = _comments_and_docstrings(text)
     text = re.sub(r"\n[ \t]*#+[ \t]?", "\n", text)
     text = re.sub(r"[\"'][ \t]*\n[ \t]*[\"']", " ", text)
+    text = re.sub(r"(?<!\w)[*_`]+(?=[\d.])|(?<=\d)[*_`]+(?=[x×]|\W|$)"
+                  r"|(?<=[x×])[*_`]+(?=\W|$)", "", text)
     return re.sub(r"\s+", " ", text)
 
 
@@ -886,17 +923,34 @@ class MeasurementBindingTest(unittest.TestCase):
         self.assertEqual(self._ratios(scanned_text("README.md", readme)), ["3.1x"])
 
     def test_every_ratio_spelling_is_caught(self) -> None:
+        """The record of what the guard reads as a ratio and what it does not.
+
+        Read through scanned_text, as the guard reads a file. The misses at
+        the end are known and accepted while nothing is published; a spelling
+        moved from there to the caught list is a deliberate widening.
+        """
         for text in ("7.7x", "8×", "7.7 ×", "2.3-fold", "2.3 fold", "3 times",
-                     "7-times", "_7.7x_", "**7.7x**", ".5x", "sevenfold",
-                     "seven-fold", "twice as often", "seven times more",
-                     "twenty times more", "twice the rate",
-                     "an order of magnitude"):
-            with self.subTest(text=text):
-                self.assertTrue(RATIO.search(f"it ran {text} here"))
+                     "7-times", "_7.7x_", "**7.7x**", "**7.7**x", "_7.7_x",
+                     "`7.7x`", ".5x", "sevenfold", "seven-fold",
+                     "twice as often", "seven times more", "twenty times more",
+                     "twice the rate", "an order of magnitude",
+                     "an order-of-magnitude gap"):
+            with self.subTest(caught=text):
+                self.assertTrue(self._ratios(
+                    scanned_text("NOTES", f"it ran {text} here")))
         for text in ("52%", "x86", "0x1f", "3x3", "half the words",
-                     "ran it twice", "several times"):
-            with self.subTest(text=text):
-                self.assertIsNone(RATIO.search(f"it ran {text} here"))
+                     "ran it twice", "several times", "logo_2x.png",
+                     "scale_3x", "3x_speed", "10_000 words",
+                     "several times the build broke", "many times the tests"):
+            with self.subTest(not_a_ratio=text):
+                self.assertEqual(self._ratios(
+                    scanned_text("NOTES", f"it ran {text} here")), [])
+        for text in ("ten times higher", "twenty-one times more",
+                     "a dozen times more", "double the rate", "seven fold",
+                     "3:1"):
+            with self.subTest(known_miss=text):
+                self.assertEqual(self._ratios(
+                    scanned_text("NOTES", f"it ran {text} here")), [])
 
     def test_a_figure_split_across_lines_is_read_as_one(self) -> None:
         for source in ("# it ran seven\n# times more\n",
@@ -914,9 +968,18 @@ class MeasurementBindingTest(unittest.TestCase):
         self.assertEqual(self._ratios(scanned_text("prose_lint.py", source)),
                          ["12.4x", "11.1x", "3.3x"])
 
-    def test_a_missing_provenance_assignment_fails_loudly(self) -> None:
-        with self.assertRaises(ValueError):
-            scanned_text("prose_lint.py", "OTHER = {}\n")
+    def test_a_missing_or_repeated_provenance_assignment_fails_loudly(self) -> None:
+        for source in ("OTHER = {}\n",
+                       'TIC_PROVENANCE = {"k": "a 1.1x"}\n'
+                       'TIC_PROVENANCE = {"k": "b"}\n'):
+            with self.subTest(source=source), self.assertRaises(ValueError):
+                scanned_text("prose_lint.py", source)
+
+    def test_only_the_provenance_literals_are_blanked(self) -> None:
+        source = ('X = "before 4.4x"; TIC_PROVENANCE = {"k": "note 9.9x",\n'
+                  '    "j": f"formatted {1} 8.8x"}; Y = "after 5.5x"\n')
+        self.assertEqual(self._ratios(scanned_text("prose_lint.py", source)),
+                         ["4.4x", "5.5x"])
 
     def test_test_prose_is_scanned_and_test_fixtures_are_not(self) -> None:
         source = ('"""Module 7.7x."""\n# comment 8x\n'
@@ -925,11 +988,13 @@ class MeasurementBindingTest(unittest.TestCase):
         self.assertEqual(sorted(self._ratios(text)), ["2.3-fold", "7.7x", "8x"])
 
     def test_a_mutant_why_is_scanned_and_its_fixtures_are_not(self) -> None:
-        spec = ('# section 6.6x\n[[mutant]]\nwhy = """it read 7.7x\n'
-                'find = "8.8x"\n"""\nfind = "a 8x"\n'
+        spec = ('# section 6.6x\n[[mutant]]  # trailing 5.5x\n'
+                'why = """it read 7.7x\nfind = "8.8x"\n"""\n'
+                'find = "a 8x # not a comment 4.4x"  # but this is 3.3x\n'
                 "replace = '''b\n9.9x'''\n")
-        self.assertEqual(self._ratios(scanned_text("mutt_check.toml", spec)),
-                         ["6.6x", "7.7x", "8.8x"])
+        self.assertEqual(
+            sorted(self._ratios(scanned_text("mutt_check.toml", spec))),
+            ["3.3x", "5.5x", "6.6x", "7.7x", "8.8x"])
 
     def test_an_allowed_value_is_allowed_only_in_its_phrase(self) -> None:
         allowed = {("README.md", "A phrase at 40x your rate"): "illustration"}
@@ -961,10 +1026,23 @@ class MeasurementBindingTest(unittest.TestCase):
                 "/".join(["examples", "x.json"])]))
 
     def test_an_unreadable_gitignore_pattern_fails_loudly(self) -> None:
-        with tempfile.TemporaryDirectory() as root:
-            self._tree(root, {".gitignore": b"/build\n"})
-            with self.assertRaises(ValueError):
-                shipped_files(root)
+        for tree in ({".gitignore": b"/build\n"}, {".gitignore": b"\\#x\n"},
+                     {".gitignore": b"a\n", "sub|.gitignore": b"b\n"}):
+            with self.subTest(tree=sorted(tree)), \
+                    tempfile.TemporaryDirectory() as root:
+                self._tree(root, tree)
+                with self.assertRaises(ValueError):
+                    shipped_files(root)
+
+    def test_a_symlink_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as outside, \
+                tempfile.TemporaryDirectory() as root:
+            self._tree(outside, {"far.md": b"ran 7.7x", "dir|near.md": b"x"})
+            self._tree(root, {"README.md": b"hello"})
+            os.symlink(os.path.join(outside, "far.md"),
+                       os.path.join(root, "link.md"))
+            os.symlink(os.path.join(outside, "dir"), os.path.join(root, "linked"))
+            self.assertEqual(shipped_files(root), ["README.md"])
 
     def test_a_copy_and_a_stale_allowance_are_both_reported(self) -> None:
         with tempfile.TemporaryDirectory() as root:

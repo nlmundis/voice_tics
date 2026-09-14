@@ -4,8 +4,8 @@ WHAT BELONGS IN CONFIG AND WHAT BELONGS IN CODE
     The line is whose fact it is.
 
     The structure detectors in ``voice_tics.STRUCTURE_PATTERNS`` are the
-    tool's substance — claims about how the model writes, each with the
-    reason it is a detector — so they live in code, in version
+    tool's substance — claims about how the model writes, each described by
+    what it matches — so they live in code, in version
     control, where a change to one is a change somebody can review.
 
     Your signature phrases, your transcript location, the domains you do not

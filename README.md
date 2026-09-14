@@ -61,9 +61,10 @@ session's model sent, and whole scheduled-run sessions. Whatever it does not
 recognise counts as the author. On the reference author's 45-day window ending
 2026-09-13, after every exclusion the tool makes, about a quarter of the words
 left as "the author" were prompts the model had drafted for sessions the author
-launched, and nearly a fifth more opened with text repeated at the start of
-five or more sessions, which the author may or may not have typed each time.
-Each correction moved the headline ratios, some of them several times over.
+launched, and nearly a fifth more were in turns whose opening text recurred at
+the start of five or more sessions, which the author may or may not have typed
+each time. Each correction moved the headline ratios, some of them several
+times over.
 
 So the method stands and the published numbers do not. Measure your own
 corpus, and read a transcript baseline as the most it could be yours, not as
@@ -218,12 +219,13 @@ your transcripts.**
   is counted and skipped, never fatal.
 - The transcript baseline is only as clean as the harness's own flags and the
   markers this tool knows. Records flagged `isMeta` or `isCompactSummary` and
-  harness notices are dropped and counted; cross-session messages are cut out
-  and counted. A user record it does not recognise is counted as yours whoever
-  wrote it: a session prompt a model drafted and you launched, a template you
-  run repeatedly, text you pasted. On the reference author's 45-day window
-  ending 2026-09-13, spawned-session prompts alone were 10,643 of the 44,314
-  author words the report kept.
+  harness notices are dropped and counted; cross-session messages are cut out,
+  or dropped with their record when a tag is left over, and counted. A user
+  record it does not recognise is counted as yours whoever wrote it: a session
+  prompt a model drafted and you launched, a template you run repeatedly, text
+  you pasted. On the reference author's 45-day window ending 2026-09-13,
+  spawned-session prompts alone were 10,643 of the 44,314 author words the
+  report kept.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged
