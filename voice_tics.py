@@ -551,10 +551,11 @@ def read_turns(paths: Sequence[str],
                     # prose it put the model on both sides of every ratio.
                     # Found 2026-09-13: in a 45-day window, 29 summaries held
                     # half the baseline's words and nine in ten of its em
-                    # dashes, which made the model's clearest em-dash habit
-                    # read as one the two writers shared. The session test
-                    # above still sees a summary, so one that carries a
-                    # scheduled-run marker still drops its session.
+                    # dashes, and dropping them moved the em dash row further
+                    # than any other. The counter, like meta_records, counts
+                    # every summary dropped, inside the date window or not.
+                    # The session test above still sees a summary, so one that
+                    # carries a scheduled-run marker still drops its session.
                     if rec.get("isCompactSummary"):
                         _count(stats, "compact_summaries")
                         continue
@@ -640,12 +641,10 @@ def read_samples(pattern: str,
         matched on is register: instructions typed to an agent are short and
         imperative, so the constructions you reach for in long-form prose
         barely occur, and no threshold over this corpus will ever surface
-        them. Measured on the reference author's transcripts over a 14-day
-        window on 2026-09-12: 8.9 words per sentence on the chat side against
-        12.2 on the model's, from only 249 baseline words, so read it as the
-        direction of the gap rather than its size. (The sentence-length
-        figures in the README table are a different measurement: 45-day
-        windows, where the two sides came out much closer.)
+        them. Measured once on the reference author's transcripts, the chat
+        side's sentences came out markedly shorter than the model's, on very
+        few baseline words and before the authorship filters existed, so read
+        it as the direction of the gap, not its size.
 
         Samples are matched on register and on author, which is what you
         actually want when the thing being linted is a document. What they
@@ -1023,12 +1022,9 @@ STRUCTURE_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
     # WikiProject AI Cleanup "signs of AI writing" page, tropes.fyi, and
     # stephenturner/skill-deslop. These are HYPOTHESES, not rules. The whole
     # point of measuring them against a matched baseline is that the folk list
-    # is not automatically true of this model: on the cleaned reference corpus
-    # the baseline author uses the lexicon below more often than the model
-    # does (README table).
-    # (The first figure this comment carried was measured against the isMeta-
-    # contaminated corpus, and was lower still.) A rule adopted from the list
-    # unmeasured would have "corrected" the wrong writer.
+    # is not automatically true of this model, and for an author whose own
+    # register overlaps the list, a rule adopted from it unmeasured corrects
+    # the wrong writer.
     (
         "delve_ecosystem",
         r"\b(?:delve|leverage|robust|seamless(?:ly)?|holistic|nuanced|"

@@ -300,16 +300,23 @@ class DocsTest(unittest.TestCase):
                 "The slop lexicon": "delve_ecosystem"}
 
     def _measurements(self) -> dict:
-        """docs/measurements/<date>.json, keyed by date."""
+        """The committed measurement files (docs, measurements, <date>.json)
+        keyed by date; empty when none exist.
+
+        None exist today: the published ratios were withdrawn because the
+        transcript baseline counted some of the model's writing as the
+        author's. The checks below still bind any measurement that returns.
+        """
         folder = os.path.join(REPO, "docs", "measurements")
-        out = {}
+        out: dict = {}
+        if not os.path.isdir(folder):
+            return out
         for name in sorted(os.listdir(folder)):
             if name.endswith(".json"):
                 with open(os.path.join(folder, name), encoding="utf-8") as fh:
                     doc = json.load(fh)
                 self.assertEqual(name, f"{doc['date']}.json")
                 out[doc["date"]] = doc
-        self.assertTrue(out, "docs/measurements holds no measurement")
         return out
 
     @staticmethod
@@ -323,18 +330,24 @@ class DocsTest(unittest.TestCase):
                  / (max(author, 0.5) / doc["author"]["words"]))
         return f"{ratio:.1f}x ({model:,} / {author:,})"
 
-    def _headline_table(self) -> "tuple[list, list]":
-        """The header cells and the rows of the README's measurement table."""
+    def _headline_table(self) -> "tuple[list, list, tuple]":
+        """The README's dated measurement table: header, rows, line span.
+
+        A table is a measurement table when any header cell holds a date.
+        Returns ([], [], (0, 0)) when the README has none.
+        """
         lines = self._readme().splitlines()
-        start = next(i for i, line in enumerate(lines)
-                     if line.startswith("|") and self.DATE.search(line))
+        start = next((i for i, line in enumerate(lines)
+                      if line.startswith("|") and self.DATE.search(line)), None)
+        if start is None:
+            return [], [], (0, 0)
         header = [c.strip() for c in lines[start].strip("|").split("|")]
         rows = []
-        for line in lines[start + 2:]:
-            if not line.startswith("|"):
-                break
-            rows.append([c.strip() for c in line.strip("|").split("|")])
-        return header, rows
+        end = start + 2
+        while end < len(lines) and lines[end].startswith("|"):
+            rows.append([c.strip() for c in lines[end].strip("|").split("|")])
+            end += 1
+        return header, rows, (start, end)
 
     def _row_key(self, label: str) -> "str | None":
         tick = re.match(r"`(\w+)`", label)
@@ -346,23 +359,30 @@ class DocsTest(unittest.TestCase):
         self.fail(f"README table row {label!r} names no known measurement")
 
     def test_the_headline_table_is_computed_from_the_measurements(self) -> None:
-        """Every cell equals what the raw counts give, and every measured
-        structure has exactly one row.
+        """Every cell equals what the raw counts give; no table, no files.
 
-        The August em dash sat in this table as 1.0x, a figure no measurement
-        ever produced. A cell a test recomputes cannot do that.
+        The August em dash sat in a table here as 1.0x, a figure no
+        measurement ever produced. A cell a test recomputes cannot do that,
+        and a measurement file with no table, or a table with no files, is a
+        claim with half its evidence missing.
         """
         measured = self._measurements()
-        header, rows = self._headline_table()
-        dates = [h for h in header if self.DATE.fullmatch(h)]
-        self.assertEqual(sorted(dates), sorted(measured),
-                         "the table's date columns and docs/measurements differ")
+        header, rows, _span = self._headline_table()
+        if not header:
+            self.assertEqual(measured, {}, "measurement files but no table")
+            return
+        measure_columns = header[1:-1]
+        for cell in measure_columns:
+            self.assertRegex(cell, rf"^{self.DATE.pattern}$",
+                             "a measurement column's header must be its date")
+        self.assertEqual(sorted(measure_columns), sorted(measured),
+                         "the table's date columns and the measurement files differ")
         keys = [self._row_key(cells[0]) for cells in rows]
         self.assertEqual(len(keys), len(set(keys)), "a measurement has two rows")
         for doc in measured.values():
             self.assertEqual(set(doc["structures"]), set(keys) - {None})
         for cells, key in zip(rows, keys):
-            for date in dates:
+            for date in measure_columns:
                 with self.subTest(row=cells[0][:30], date=date):
                     self.assertEqual(cells[header.index(date)],
                                      self._figure(measured[date], key))
@@ -379,29 +399,32 @@ class DocsTest(unittest.TestCase):
                                   readme)
 
     def test_tic_provenance_is_computed_from_the_measurements(self) -> None:
-        """Each dated figure in TIC_PROVENANCE equals the one the counts give.
+        """Each dated figure in TIC_PROVENANCE equals the one the counts give,
+        and a note carries no ratio that is not such a figure.
 
-        Matching the ratio anywhere in the README stopped meaning anything once
+        Matching a ratio anywhere in the README stopped meaning anything once
         the table carried two dates, and "12.4x" contains "2.4x".
         """
         measured = self._measurements()
         for key, note in prose_lint.TIC_PROVENANCE.items():
             figures = list(self.PROVENANCE_FIGURE.finditer(note))
             with self.subTest(key=key):
-                self.assertEqual(sorted(f.group("date") for f in figures),
-                                 sorted(measured))
-                # An undated ratio in the note would be checked by nothing.
                 self.assertEqual(len(self.RATIO.findall(note)), len(figures),
                                  f"{key}'s note carries a ratio with no date "
                                  "and counts")
                 for fig in figures:
+                    self.assertIn(fig.group("date"), measured,
+                                  f"{key} cites a date with no measurement")
                     self.assertEqual(
                         f"{fig.group('ratio')} ({fig.group('counts')})",
                         self._figure(measured[fig.group("date")], key))
 
-    # Ratios in shipped files that are not copies of a measurement in
-    # docs/measurements, each with the reason it may stay.
+    # Ratios in shipped files that are not measurements, each with the reason
+    # it may stay. Anything else must be a recomputed table cell.
     ALLOWED_RATIOS = {
+        ("README.md", "40x"): "illustration of what a tic ratio means",
+        ("README.md", "593x"): "synthetic contamination sweep",
+        ("README.md", "3.2x"): "synthetic contamination sweep",
         ("voice_tics.py", "40x"): "illustration of what a tic ratio means",
         ("voice_tics.py", "364x"): "scheduled-run prompts found by the first scan",
         ("voice_tics.py", "113x"): "a harness notice found by the first scan",
@@ -409,29 +432,35 @@ class DocsTest(unittest.TestCase):
         ("voice_tics.py", "3.2x"): "synthetic contamination sweep",
         ("voice_tics.py", "1.3x"): "synthetic contamination sweep",
     }
-    RATIO = re.compile(r"(?i)(?<![\w.%\\])\d+(?:[.,]\d+)?\s?(?:x|\u00d7|-fold|times)(?!\w)")
+    RATIO = re.compile(r"(?i)(?<![\w.%\\])\d+(?:[.,]\d+)?\s?(?:x|×|-fold|times)(?!\w)")
 
     def test_measured_ratios_are_not_copied_into_other_files(self) -> None:
-        """Only the README table and TIC_PROVENANCE, both recomputed from
-        docs/measurements, carry measured ratios.
+        """No shipped file, the README included, carries a measured ratio
+        outside a table the tests recompute and the TIC_PROVENANCE literal
+        they check.
 
         The August em dash sat in four files as 1.0x, a figure no measurement
         ever produced, and each copy looked like corroboration for the others.
-        Any other ratio in a shipped file must be named in ALLOWED_RATIOS.
+        Any other ratio must be named in ALLOWED_RATIOS with its reason.
         """
         provenance = re.compile(r"TIC_PROVENANCE: Dict\[str, str\] = \{.*?\n\}",
                                 re.S)
         shipped = [n for n in sorted(os.listdir(REPO))
-                   if n.endswith((".py", ".example")) or n == "Makefile"]
+                   if n.endswith((".py", ".example", ".md")) or n == "Makefile"]
         shipped += [os.path.join("examples", n)
                     for n in sorted(os.listdir(os.path.join(REPO, "examples")))]
         found = set()
         for name in shipped:
-            text = provenance.sub("", _read(os.path.join(REPO, name)))
+            text = _read(os.path.join(REPO, name))
+            if name == "prose_lint.py":
+                text = provenance.sub("", text)
+            if name == "README.md":
+                _header, _rows, (start, end) = self._headline_table()
+                lines = text.splitlines()
+                text = "\n".join(lines[:start] + lines[end:])
             for match in self.RATIO.findall(text):
                 found.add((name, re.sub(r"\s", "", match)))
         self.assertEqual(sorted(found - set(self.ALLOWED_RATIOS)), [])
-
 
 class StdlibOnlyTest(unittest.TestCase):
     """"Stdlib only, Python 3.9+" must be true with no TOML parser installed.

@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""Lint a document for the model tics that measurement actually confirmed.
+"""Lint a document for model tics chosen by measuring against a matched baseline.
 
-Every rule here earned its place by separating the model from a human author
-on a matched corpus. Nothing is here because it sounds robotic.
+Every rule here was chosen because it separated the model from a human author
+on a matched corpus, not because it sounds robotic. Those measurements have
+since been withdrawn (see the README: the transcript baseline counted some of
+the model's writing as the author's), so the defaults are a starting point.
+Measure your own before you rely on them.
 
 WHAT IS DELIBERATELY ABSENT, AND WHY
     * **Any sentence-length or readability threshold.** A length threshold
-      measures register, not authorship. On the reference corpus the model's
-      sentences run somewhat longer than the author's CHAT turns (README
-      table), but this linter runs on documents, and a chat baseline says
-      nothing about how long the author's document sentences are. A length
+      measures register, not authorship. This linter runs on documents, and
+      a chat baseline says nothing about how long the author's document
+      sentences are. A length
       gate lints an ACADEMIC REGISTER — long compound-complex sentences,
       passive voice, "However" — and deletes it. The tool that did exactly
       that to the reference author drew this summary from him: "we
       essentially made me sound simpler so I don't sound like AI." Sentence
       length is REPORTED here and can never fail a run.
 
-    * **The slop lexicon** ("delve", "crucial", …): on the reference corpus the
-      AUTHOR uses those words more often than the model does, on both
-      measured dates (README table, on a handful of uses). A lexicon rule
-      would flag the author before the model.
+    * **The slop lexicon** ("delve", "crucial", …): a list of words somebody
+      decided sound robotic. For an author whose register overlaps it, a
+      lexicon rule flags the author as readily as the model, and only a
+      matched baseline can say which of the two you are.
 
     * **The chat-register family** ("let me check", "want me to"): the largest
       measured tics by far, and useless here, because none of them can appear
@@ -27,11 +29,8 @@ WHAT IS DELIBERATELY ABSENT, AND WHY
       as a property of the register rather than of the prose.
 
 WHAT FAILS A RUN INSTEAD
-    Structures, at the model's measured ratios. The figures and the counts
-    they rest on are in ``TIC_PROVENANCE`` below and in the README table,
-    which a test holds together; they are not repeated here, because a third
-    copy is how one of them goes stale. Which keys are in force is config;
-    these are the shipped defaults:
+    Structures. ``TIC_PROVENANCE`` below records why each default is in its
+    tier. Which keys are in force is config; these are the shipped defaults:
 
     * ``method_defence``: defending the method instead of stating the
       finding. It reaches documents through model drafts rather than through
@@ -41,11 +40,14 @@ WHAT FAILS A RUN INSTEAD
       model-heavier but genuinely shared, so an occurrence is a prompt to
       look, not proof of a draft. ``--strict`` promotes warnings to failures.
 
-    A lone em dash is available as a rule and ships OFF. The em dash itself
-    separates strongly on the reference corpus (README table), but the rule
-    is one author's punctuation preference about LONE dashes, not a
-    measurement of a rate. Turn it on if your own measurement and your own
-    style both say so.
+    A lone em dash is available as a rule and ships OFF. It is one author's
+    punctuation preference about LONE dashes, not a measurement of a rate.
+    Turn it on if your own measurement and your own style both say so.
+
+    Every rule here, not only a length threshold, was measured against a chat
+    baseline and runs on documents. ``--baseline-from`` in voice_tics.py
+    measures against documents instead, which is the better test of a rule
+    you mean to enforce on documents.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     Those ratios come from one author and one corpus. Run ``voice_tics.py``
@@ -83,17 +85,12 @@ import vt_config as config_mod
 import emdash
 import voice_tics
 
-# The measurement behind each DEFAULT tier key, as a rate ratio of
-# model-over-baseline on the reference corpus (45-day windows ending 2026-08-13
-# and 2026-09-13, this repo's code), with the model / author uses each ratio
-# rests on. tests/test_repo.py recomputes every figure here from
-# docs/measurements and checks it against the README table. Kept beside the
-# keys so a future re-tiering starts from a number rather than from taste.
-#
-# The tiers themselves were chosen on earlier figures that counted the model's
-# compaction summaries as the author's writing. These corrected figures do not
-# rank them the same way: on 2026-08-13 the warning appositive_negation
-# separates more than the error method_defence.
+# Why each DEFAULT tier key is in the tier it is in. The tiers were chosen on
+# ratios measured against the reference author's transcripts, and those ratios
+# are withdrawn (README): the baseline counted some of the model's writing as
+# the author's. So no figure is kept here. A ratio in this table would have to
+# be a dated measurement file committed under docs, which tests/test_repo.py
+# recomputes; until a baseline is trusted, there is none to cite.
 #
 # Which keys are actually in force is ``[lint] error`` and ``[lint] warn``,
 # defaulting to config.DEFAULT_ERROR_TICS and DEFAULT_WARN_TICS. This table is
@@ -101,16 +98,17 @@ import voice_tics
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
     "method_defence":
-        "2.3x model/baseline, 2026-09-13 (345 / 8 uses); "
-        "2.3x on 2026-08-13 (81 / 2 uses)",
+        "error: defending the method instead of stating the finding reaches "
+        "documents through model drafts; chosen on withdrawn ratios, so "
+        "re-measure before relying on the tier",
     "not_x_but_y":
-        "5.9x model/baseline, 2026-09-13 (113 / 1 uses); "
-        "4.7x on 2026-08-13 (42 / 0 uses); one author use or none, "
-        "so the ratio is unstable",
+        "error: the explicit reveal template; chosen on withdrawn ratios "
+        "that rested on one author use or none, so re-measure before "
+        "relying on the tier",
     "appositive_negation":
-        "1.7x model/baseline, 2026-09-13 (2,462 / 77 uses); "
-        "4.4x on 2026-08-13 (713 / 9 uses); shared, model-heavier, so a "
-        "warning rather than an error",
+        "warning: shared, model-heavier, so a prompt to look rather than an "
+        "error; chosen on withdrawn ratios, so re-measure before relying on "
+        "the tier",
 }
 
 EXCERPT_CAP = 60
@@ -405,7 +403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point; returns the process exit code."""
     ap = argparse.ArgumentParser(
         description="Lint a document for measured model tics "
-                    "(no sentence-length threshold, by measurement)")
+                    "(no sentence-length threshold: length measures register)")
     ap.add_argument("files", nargs="+", metavar="FILE",
                     help="markdown/text files to lint, or - for stdin")
     ap.add_argument("--strict", action="store_true",

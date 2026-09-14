@@ -51,9 +51,7 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # The set below is a worked example from an author with an academic register.
 # Note what it is FOR: these are the words a generic AI-slop detector would
 # flag as machine-written. Measuring them against the model is how you find out
-# that they are yours, and that a wordlist would have deleted your voice. On
-# the reference corpus the author used that lexicon more often than the model
-# did (see the README table).
+# that they are yours, and that a wordlist would have deleted your voice.
 #
 # Keep the provenance split when you fill this in. Some entries will be things
 # you KNOW about your writing; others will be hypotheses. A ratio near 1.0 on a
@@ -87,8 +85,8 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # quietly stopped being checked is worse than a crash, because the build goes
 # green.
 #
-# The defaults are these, and they are a measurement rather than a preference.
-# The ratios and the counts behind them are in the README table:
+# The defaults are these. They were chosen by measuring, on ratios the README
+# has since withdrawn, so re-measure before you rely on them:
 #
 #   method_defence       defending the method instead of stating it
 #   not_x_but_y          the explicit "it's not A, it's B" reveal
@@ -126,10 +124,9 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # A lone em dash outside a matched pair.
 #
 # OFF by default, on purpose. The em dash is the most-cited AI tell in public
-# advice, and on the reference corpus it holds: the model writes far more of
-# them than the author (see the README table). But this rule is about LONE
-# dashes, which is one author's punctuation preference rather than a
-# measurement, so it waits for you to opt in.
+# advice; measure it on your own corpus before you act on it. And this rule is
+# about LONE dashes, which is one author's punctuation preference rather than
+# a measurement, so it waits for you to opt in.
 #
 # Measure yours before turning this on.
 enabled = false

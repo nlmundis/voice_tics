@@ -8,10 +8,10 @@ measurement, which is why ``[lint.emdash] enabled`` is false by default.
 WHY IT SHIPS ANYWAY
     The em dash is the single most-cited "AI tell" in public advice, which
     makes it a good test of this repo's argument that every tell has to be
-    measured before anyone acts on it. On the reference corpus the tell holds:
-    the model writes far more em dashes than the author does (README table).
-    That supports looking at a draft's em dashes. It does not make "no lone
-    dashes" anyone's rule but the author's.
+    measured before anyone acts on it. Even where the measurement says the
+    model writes far more em dashes than you do, that supports looking at a
+    draft's em dashes. It does not make "no lone dashes" anyone's rule but
+    the author's.
 
     So run ``voice_tics.py`` first, read the ``em_dash_aside`` row, and turn
     this on if YOUR ratio and your own style both say so.

@@ -445,6 +445,13 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertNotIn("summarised", " ".join(t.text for t in self.turns))
         self.assertEqual(stats.get("compact_summaries"), 1)
 
+    def test_the_report_says_how_many_summaries_were_dropped(self) -> None:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        report = vt.render(mine, theirs, [], structures, 0, False,
+                           stats={"sessions": 1, "compact_summaries": 3})
+        self.assertIn("3 compaction summaries", report)
+
     def test_a_summary_still_marks_a_scheduled_session(self) -> None:
         summary = json.loads(_rec("user", "This is a scheduled task. Summary."))
         summary["isCompactSummary"] = True
