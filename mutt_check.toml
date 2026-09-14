@@ -404,8 +404,8 @@ name = "meta_records_counted_after_the_noise_filter"
 why = "An isMeta record carrying harness markup was excluded and attributed to nothing, understating the reported exclusion."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                    if rec.get(\"isMeta\"):\n                        _count(stats, \"meta_records\")"
-replace = "                    if not text:\n                        continue\n                    if rec.get(\"isMeta\"):\n                        _count(stats, \"meta_records\")"
+find = "                    if rec.get(\"isMeta\"):\n                        _count(tally, \"meta_records\")"
+replace = "                    if not text:\n                        continue\n                    if rec.get(\"isMeta\"):\n                        _count(tally, \"meta_records\")"
 
 [[mutant]]
 name = "notice_markers_match_anywhere_in_the_record"
@@ -420,8 +420,8 @@ name = "dropped_notices_go_uncounted"
 why = "Every other exclusion is reported; an uncounted one is an exclusion nobody can see."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = '                        _count(stats, "noise_records")'
-replace = "                        pass"
+find = "                    if text is None and _has_text(content):\n                        _count(tally, \"noise_records\")"
+replace = "                    if text is None and _has_text(content):\n                        pass"
 
 [[mutant]]
 name = "naive_timestamp_left_naive"
@@ -497,7 +497,7 @@ replace = "                                        recursive=False) if os.path.i
 
 [[mutant]]
 name = "structures_table_drops_the_floor"
-why = "Without the continuity floor the strongest possible tic printed 0.0x and sorted as unused."
+why = "Without the continuity floor the strongest possible tic printed a zero ratio and sorted as unused."
 suites = ["tests.test_voice_tics.BaselineFloorTest"]
 file = "voice_tics.py"
 find = "        mr, tr = mine.rate(m), theirs.rate(max(t, BASELINE_FLOOR_COUNT))"
@@ -579,7 +579,7 @@ replace = "        if False:\n            # The counter that makes skipping"
 
 [[mutant]]
 name = "set_aside_turns_reported_as_kept"
-why = "The report credited the transcript with turns main() discarded, overstating its contribution by 2x."
+why = "The report credited the transcript with turns main() discarded, overstating its contribution."
 suites = ["tests.test_samples.SampleBaselineEndToEndTest"]
 file = "voice_tics.py"
 find = '        stats["turns"] = stats.get("turns", 0) - set_aside'
@@ -700,3 +700,411 @@ suites = ["tests.test_prose_lint.OneEngineForEveryRule", "tests.test_prose_lint.
 file = "prose_lint.py"
 find = '''        "." if emdash.is_table_row(plain) else raw'''
 replace = '''        "" if emdash.is_table_row(plain) else raw'''
+
+# --- measured figures: withdrawn, and kept out until a baseline is trusted --
+
+[[mutant]]
+name = "unsourced_table_reintroduced"
+why = "A results table with no measurement files behind it is how 1.0x reached the README with no run that ever produced it."
+suites = ["tests.test_repo.DocsTest"]
+file = "README.md"
+find = "### Why there is no results table\n"
+replace = "### Why there is no results table\n\n| Measured | 2026-09-13 | What a wordlist does |\n|---|---|---|\n| Em dash | 7.7x (14,747 / 100) | Treats it as the signature tell |\n"
+
+[[mutant]]
+name = "ratio_reintroduced_into_readme_prose"
+why = "A withdrawn figure quoted in prose is checked by nothing and reads as a finding."
+suites = ["tests.test_repo.DocsTest"]
+file = "README.md"
+find = "each time. Each correction moved the headline ratios, some of them several"
+replace = "each time. Each correction moved the headline ratios (em dash 7.7x), some of them several"
+
+[[mutant]]
+name = "measured_ratio_copied_into_a_docstring"
+why = "An unchecked copy is how 1.0x sat in four files with no measurement behind it, each looking like corroboration."
+suites = ["tests.test_repo.DocsTest"]
+file = "emdash.py"
+find = "    measured before anyone acts on it. Even where the measurement says the"
+replace = "    measured before anyone acts on it (2.3x). Even where the measurement says the"
+
+[[mutant]]
+name = "integer_ratio_copied_into_a_comment"
+why = "A copy with no decimal point is still a copy; the guard must not key on one spelling."
+suites = ["tests.test_repo.DocsTest"]
+file = "vt_config.py"
+find = "# how one of them goes stale. They are only a default, and the whole argument"
+replace = "# how one of them goes stale (8x). They are only a default, and the whole argument"
+
+[[mutant]]
+name = "undated_ratio_hidden_in_the_provenance"
+why = "The provenance literal is exempt from the copy guard, so a ratio there with no dated measurement would be checked by nothing."
+suites = ["tests.test_repo.DocsTest"]
+file = "prose_lint.py"
+find = '        "error: the explicit reveal template; chosen on withdrawn ratios "'
+replace = '        "error: the explicit reveal template, once 12.4x; chosen on withdrawn ratios "'
+
+[[mutant]]
+name = "compaction_summary_counted_as_the_author"
+why = "The model writes the compaction summary; counted as the author, summaries held half of one 45-day baseline's words."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                    if rec.get("isCompactSummary"):'
+replace = "                    if False:"
+
+[[mutant]]
+name = "compaction_summaries_dropped_uncounted"
+why = "Every other exclusion is reported; an uncounted one hides how much of the baseline was model text."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                        _count(tally, "compact_summaries")'
+replace = "                        pass"
+
+[[mutant]]
+name = "dropped_summaries_missing_from_the_report"
+why = "A counted exclusion that never prints is still an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '''                   f"{stats.get('compact_summaries', 0):,} compaction "'''
+replace = '''                   f""'''
+
+# --- records the harness does not flag ------------------------------------
+
+
+[[mutant]]
+name = "cross_session_message_counted_as_the_author"
+why = "Another session's model wrote it and the harness delivers it unflagged; ten such records survived every other filter in one 45-day window."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if CROSS_SESSION_OPEN in raw:\n        withheld = \"cross_session\""
+replace = "    if False:\n        withheld = \"cross_session\""
+
+[[mutant]]
+name = "cross_session_messages_dropped_uncounted"
+why = "An exclusion the report never shows hides how much of the baseline was another model's text."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if withheld == \"cross_session\":\n                        _count(tally, \"cross_session_messages\")"
+replace = "                    if withheld == \"cross_session\":\n                        pass"
+
+[[mutant]]
+name = "cross_session_tag_matched_without_its_attribute"
+why = "An author discussing the tag is still the author; only the harness writes the from attribute."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "CROSS_SESSION_OPEN = '<cross-session-message from=\"'"
+replace = "CROSS_SESSION_OPEN = '<cross-session-message'"
+
+[[mutant]]
+name = "text_beside_a_cross_session_message_dropped"
+why = "Dropping the whole record deletes what was typed beside the message, the mistake system reminders already made once."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        raw = CROSS_SESSION_RE.sub(\"\\n\", raw)"
+replace = "        return None, withheld"
+
+[[mutant]]
+name = "user_notices_go_uncounted"
+why = "Hook output and task notifications in user records were dropped with no counter, so the report understated what it excluded."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    elif withheld == \"notice\":\n                        _count(tally, \"noise_records\")"
+replace = "                    elif withheld == \"notice\":\n                        pass"
+
+[[mutant]]
+name = "subagent_records_dropped_uncounted"
+why = "Subagent records are dropped as a different job; uncounted, the report hid the largest exclusion a recursive scan makes."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    _count(tally, \"sidechain_records\")"
+replace = "                    pass"
+
+[[mutant]]
+name = "exclusions_counted_outside_the_window"
+why = "Under --days the report counted records the date cutoff drops anyway, overstating what each filter removed."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                tally = excluded if in_window else None"
+replace = "                tally = excluded"
+
+[[mutant]]
+name = "dropped_scheduled_run_counted_twice"
+why = "A scheduled run is reported as one dropped session; counting its records as exclusions too reports them twice."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if automated:\n            continue\n        if stats is not None:\n            for key, n in excluded.items():"
+replace = "        if stats is not None:\n            for key, n in excluded.items():\n                stats[key] = stats.get(key, 0) + n\n        if automated:\n            continue\n        if stats is not None:\n            for key, n in ():"
+
+[[mutant]]
+name = "compaction_keyed_on_the_wrong_flag"
+why = "isVisibleInTranscriptOnly rides along on summaries; a filter keyed on it passes any test that sets both flags."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if rec.get(\"isCompactSummary\"):"
+replace = "                    if rec.get(\"isVisibleInTranscriptOnly\"):"
+
+[[mutant]]
+name = "cross_session_messages_missing_from_the_report"
+why = "A counted exclusion that never prints is still an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   f\"{stats.get('cross_session_messages', 0):,} with \""
+replace = "                   f\"\""
+
+# --- the measurement checks, while nothing is published for them ------------
+
+
+[[mutant]]
+name = "measurement_columns_taken_by_position"
+why = "Taking the columns between the label and the last cell exempted a trailing date column from every check."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    columns = [i for i, cell in enumerate(header) if i and DATE.fullmatch(cell)]"
+replace = "    columns = list(range(1, len(header) - 1))"
+
+[[mutant]]
+name = "whole_table_exempt_from_the_copy_guard"
+why = "Blanking the table's line span let a ratio in its prose column past the guard."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        for i in table[\"columns\"]:\n            if i < len(cells):\n                cells[i] = \"\""
+replace = "        cells = []"
+
+[[mutant]]
+name = "comments_in_the_provenance_literal_exempt"
+why = "Only TIC_PROVENANCE's strings are checked by the provenance test; a comment beside them was checked by nothing."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        elif tok.type == tokenize.STRING and opened is None and first <= a and b <= last:"
+replace = "        elif tok.type in (tokenize.STRING, tokenize.COMMENT) and opened is None and first <= a and b <= last:"
+
+[[mutant]]
+name = "test_docstrings_left_unscanned"
+why = "A withdrawn em-dash ratio survived in a test docstring because the guard read only top-level files."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        text = _comments_and_docstrings(text)"
+replace = "        text = \"\""
+
+[[mutant]]
+name = "mutant_whys_left_unscanned"
+why = "The same withdrawn figure survived in a mutant's why, published in the spec."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        text = _mutation_spec_prose(text)"
+replace = "        text = \"\""
+
+[[mutant]]
+name = "shipped_files_not_walked_into_folders"
+why = "A fixed list of files is how tests/ went unscanned; a new folder must be read without anyone adding it."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        dirs[:] = sorted(\n"
+replace = "        dirs[:] = [] and sorted(\n"
+
+[[mutant]]
+name = "allowed_value_allowed_anywhere_in_its_file"
+why = "Keyed by file and value, an allowed synthetic figure would let the same number through as a new measured claim anywhere in the README."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "              if not any(a <= m.start() and m.end() <= b for a, b in spans)]"
+replace = "              if not spans]"
+
+[[mutant]]
+name = "spelled_out_multiples_not_ratios"
+why = "The README once stated withdrawn multiples in words; a guard for digits alone misses every one of them."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
+replace = "    rf\"|(?!){_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
+
+[[mutant]]
+name = "ratio_copied_into_a_test_docstring"
+why = "A test docstring is published prose; a withdrawn ratio sat in one after every other copy was removed."
+suites = ["tests.test_repo.DocsTest"]
+file = "tests/test_voice_tics.py"
+find = "        record. Counted as the author, summaries held half of one 45-day"
+replace = "        record. Counted as the author, summaries held half (7.7x) of one 45-day"
+
+[[mutant]]
+name = "quoted_close_tag_leaks_the_message_remainder"
+why = "A message quoting the close tag ended the match early, and the rest of the other session's text counted as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if CROSS_SESSION_OPEN in raw or CROSS_SESSION_CLOSE in raw:"
+replace = "        if CROSS_SESSION_OPEN in raw:"
+
+[[mutant]]
+name = "notice_ignored_beside_a_cross_session_message"
+why = "Skipping the notice check once a message was cut would keep harness notice text as the author's prose."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if any(marker in raw for marker in USER_NOISE_MARKERS):\n        return None, withheld or \"notice\""
+replace = "    if not withheld and any(marker in raw for marker in USER_NOISE_MARKERS):\n        return None, withheld or \"notice\""
+
+[[mutant]]
+name = "undated_record_treated_as_outside_the_window"
+why = "A record with no timestamp has always been kept under --days; treating it as outside would drop it and hide its exclusions."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                in_window = since is None or when is None or when >= since"
+replace = "                in_window = since is None or (when is not None and when >= since)"
+
+[[mutant]]
+name = "non_date_column_among_the_measurements"
+why = "A non-date column anywhere but first or last is neither recomputed nor rejected, so a share placed there would be published unchecked."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        elif i != last:"
+replace = "        elif False:"
+
+[[mutant]]
+name = "separator_row_not_required"
+why = "Without the |---| row the first data row is read as the separator and its cells are checked by nothing."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    if start + 1 >= len(lines) or not SEPARATOR.fullmatch(lines[start + 1].strip()):"
+replace = "    if False:"
+
+[[mutant]]
+name = "unknown_table_row_accepted"
+why = "A row that names no measurement is a figure nothing recomputes."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            problems.append(f\"row {cells[0]!r} names no known measurement\")"
+replace = "            pass"
+
+[[mutant]]
+name = "measured_structures_not_matched_to_rows"
+why = "A measurement file with structures the table leaves out is evidence the README does not show."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            problems.append(f\"{date} measures other structures than the rows\")"
+replace = "            pass"
+
+[[mutant]]
+name = "gitignored_file_scanned"
+why = "A developer's own untracked config holding any figure failed make check on that machine only."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            if name == \".git\" or ignored(name, False) or os.path.islink(path):"
+replace = "            if name == \".git\" or os.path.islink(path):"
+
+[[mutant]]
+name = "virtual_environment_scanned"
+why = "A venv without the name venv holds thousands of third-party files the repo does not publish."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "                    or os.path.isfile(os.path.join(folder, d, \"pyvenv.cfg\"))"
+replace = "                    or False"
+
+[[mutant]]
+name = "files_chosen_by_suffix"
+why = "Choosing by suffix is how a file with none, such as a CHANGELOG, would be published unscanned."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            out.append(os.path.relpath(path, root).replace(os.sep, \"/\"))"
+replace = "            if \".\" in name[1:]:\n                out.append(os.path.relpath(path, root).replace(os.sep, \"/\"))"
+
+[[mutant]]
+name = "unsupported_gitignore_pattern_read_as_a_name"
+why = "A pattern the walk cannot read would silently scan or skip the wrong files; it must fail instead."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        if (pattern.startswith(\"!\") or \"/\" in pattern or \"**\" in pattern\n                or \"\\\\\" in pattern):"
+replace = "        if False:"
+
+[[mutant]]
+name = "stale_allowance_not_reported"
+why = "An allowance whose phrase is gone would let that phrase, and its figure, back into the file without review."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    return copies, sorted(set(allowed) - found)"
+replace = "    return copies, []"
+
+[[mutant]]
+name = "comment_markers_split_a_figure"
+why = "A multiple spelled across two comment lines read as two harmless fragments."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    text = re.sub(r\"\\n[ \\t]*#+[ \\t]?\", \"\\n\", text)"
+replace = "    pass"
+
+[[mutant]]
+name = "joined_string_literals_read_apart"
+why = "A multiple split across implicitly joined string literals read as two harmless fragments."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    text = re.sub(r\"[\\\"'][ \\t]*\\n[ \\t]*[\\\"']\", \" \", text)"
+replace = "    pass"
+
+[[mutant]]
+name = "missing_provenance_assignment_scans_nothing"
+why = "Two TIC_PROVENANCE assignments would have the guard blank the first one's strings and trust them; the guard must fail instead."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    if len(assigns) != 1:"
+replace = "    if False:"
+
+[[mutant]]
+name = "readme_fails_its_own_linter"
+why = "A reflow joined 'that is' and 'deliberate' and the README failed the linter it documents."
+suites = ["tests.test_repo.DocsTest"]
+file = "README.md"
+find = "above). This one is your own list, with no measurement behind it:"
+replace = "above). This one is not chosen by measuring at all, and that is deliberate:"
+
+[[mutant]]
+name = "emphasis_around_a_number_hides_the_ratio"
+why = "Markdown emphasis around the number alone, as in bold digits before an x, read as no ratio at all."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    text = re.sub(r\"(?<!\\w)[*_`]+(?=[\\d.])|(?<=\\d)[*_`]+(?=[x×]|\\W|$)\"\n                  r\"|(?<=[x×])[*_`]+(?=\\W|$)\", \"\", text)"
+replace = "    pass"
+
+[[mutant]]
+name = "ratio_boundaries_ignore_underscores"
+why = "Treating an underscore as a boundary flagged asset names like logo_2x.png as copied ratios."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    r\"(?i)(?<![\\w.%\\\\])\\d*[.,]?\\d+(?:\\s?[x×]|\\s?-?(?:fold|times))(?!\\w)\""
+replace = "    r\"(?i)(?<![A-Za-z0-9.%\\\\])\\d*[.,]?\\d+(?:\\s?[x×]|\\s?-?(?:fold|times))(?![A-Za-z0-9])\""
+
+[[mutant]]
+name = "number_word_times_the_reads_as_a_ratio"
+why = "'several times the build broke' is ordinary prose; only twice and thrice take 'the' as a multiple."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less)\\b\""
+replace = "    rf\"|\\b{_NUMBER_WORDS}[\\s-]+times\\s+(?:as|more|less|the)\\b\""
+
+[[mutant]]
+name = "trailing_spec_comments_unscanned"
+why = "Reading the spec with a TOML parser dropped comments after a value, which the raw-text pass had read."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    parts = re.findall(r\"#[^\\n]*\", _TOML_STRING.sub(\"\", text))"
+replace = "    parts = [line for line in text.splitlines() if line.lstrip().startswith(\"#\")]"
+
+[[mutant]]
+name = "symlinked_file_read"
+why = "git stores a symlink as a link; reading its target scanned text the repo does not publish."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "            if name == \".git\" or ignored(name, False) or os.path.islink(path):"
+replace = "            if name == \".git\" or ignored(name, False):"
+
+[[mutant]]
+name = "nested_gitignore_silently_unread"
+why = "A nested .gitignore the walk does not read would let a developer's ignored file fail their build with no hint why."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "        if folder != root and \".gitignore\" in files:"
+replace = "        if False:"
+
+[[mutant]]
+name = "provenance_blanked_by_whole_line"
+why = "Blanking every string on the assignment's lines hid a figure in a statement sharing the line."
+suites = ["tests.test_repo.MeasurementBindingTest"]
+file = "tests/test_repo.py"
+find = "    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)"
+replace = "    first, last = offsets[node.lineno - 1], offsets[node.end_lineno]"

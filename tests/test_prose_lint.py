@@ -2,10 +2,10 @@
 
 The case that matters most is the one the re-aim exists for: a long,
 passive, "However"-led academic sentence must produce ZERO findings. The
-predecessor failed builds at mean sentence length over 16, and the matched
-baseline showed that threshold detects the author's register, not the model
-(13.89 vs 13.85 words/sentence). If anyone re-adds a length gate, the
-academic-register test here goes red — that is its job, not decoration.
+predecessor failed builds at mean sentence length over 16, and a length
+threshold measures register, not authorship (see the README). If anyone
+re-adds a length gate, the academic-register test here goes red — that is its
+job, not decoration.
 
 The second case that carries weight is line numbers across a code fence. The
 corpus scanner's ``scrub`` collapses a multi-line fence to one space, which

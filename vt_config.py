@@ -4,8 +4,8 @@ WHAT BELONGS IN CONFIG AND WHAT BELONGS IN CODE
     The line is whose fact it is.
 
     The structure detectors in ``voice_tics.STRUCTURE_PATTERNS`` are the
-    tool's substance — claims about how the model writes, each with its
-    measured ratio recorded beside it — so they live in code, in version
+    tool's substance — claims about how the model writes, each described by
+    what it matches — so they live in code, in version
     control, where a change to one is a change somebody can review.
 
     Your signature phrases, your transcript location, the domains you do not
@@ -74,17 +74,16 @@ def _toml_module() -> Any:
 DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 
 # Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
-# two are the defaults because they are the ones whose measured separation was
-# large enough to act on. The ratios themselves live in ONE place,
-# ``prose_lint.TIC_PROVENANCE``, and are deliberately not repeated here: a
-# second copy of a measurement is how one of them goes stale (this comment
-# once carried 6.6x for method_defence, the figure for the detector before it
-# was sharpened, beside a 10.0x everywhere else). They are still only a
-# default: the whole argument of this tool is that you should measure your own.
+# two were chosen as the defaults on ratios the README has since withdrawn,
+# because the transcript baseline counted some of the model's writing as the
+# author's. No figure is repeated here: an unchecked copy of a measurement is
+# how one of them goes stale. They are only a default, and the whole argument
+# of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 
-# Model-heavier but genuinely shared, so an occurrence is a prompt to look
-# rather than proof of a draft. Warnings never fail a run without --strict.
+# A warning, so an occurrence is a prompt to look rather than proof of a
+# draft; chosen on the same withdrawn ratios. Warnings never fail a run
+# without --strict.
 DEFAULT_WARN_TICS: Tuple[str, ...] = ("appositive_negation",)
 
 TOP_KEYS = frozenset({"corpus", "baseline", "lint", "output"})

@@ -51,9 +51,7 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # The set below is a worked example from an author with an academic register.
 # Note what it is FOR: these are the words a generic AI-slop detector would
 # flag as machine-written. Measuring them against the model is how you find out
-# that they are yours, and that a wordlist would have deleted your voice. On
-# the reference corpus that lexicon measured 0.6x — the author used those words
-# nearly twice as often as the model did.
+# that they are yours, and that a wordlist would have deleted your voice.
 #
 # Keep the provenance split when you fill this in. Some entries will be things
 # you KNOW about your writing; others will be hypotheses. A ratio near 1.0 on a
@@ -87,12 +85,12 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # quietly stopped being checked is worse than a crash, because the build goes
 # green.
 #
-# The defaults are these, and they are a measurement rather than a preference
-# (rates per 10k words, model over baseline, 45-day reference corpus):
+# The defaults are these. They were chosen by measuring, on ratios the README
+# has since withdrawn, so re-measure before you rely on them:
 #
-#   method_defence      10.0x   defending the method instead of stating it
-#   not_x_but_y          7.7x   the explicit "it's not A, it's B" reveal
-#   appositive_negation  2.4x   "Y, not X" — shared but model-heavier, so warn
+#   method_defence       defending the method instead of stating it
+#   not_x_but_y          the explicit "it's not A, it's B" reveal
+#   appositive_negation  "Y, not X", a warning
 #
 # Re-measure on your own corpus before trusting them. Run voice_tics.py, read
 # the STRUCTURES table, and promote what separates for YOU.
@@ -126,9 +124,9 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # A lone em dash outside a matched pair.
 #
 # OFF by default, on purpose. The em dash is the most-cited AI tell in public
-# advice and it did not survive measurement: on the reference corpus the model
-# and the author used it at the same rate, 1.0x. Gating on it would have
-# corrected the wrong writer, which is this repo's entire argument in one row.
+# advice; measure it on your own corpus before you act on it. And this rule is
+# about LONE dashes, which is one author's punctuation preference rather than
+# a measurement, so it waits for you to opt in.
 #
 # Measure yours before turning this on.
 enabled = false

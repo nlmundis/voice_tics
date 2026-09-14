@@ -4,7 +4,7 @@ Find the phrases and structures an AI model overuses, by measuring them
 against **your own writing**, not against a list of words somebody decided
 sound robotic.
 
-Then lint documents for the ones that actually separated.
+Then lint documents for the ones your own measurement separates.
 
 ```bash
 python3 voice_tics.py --days 30                 # what does the model repeat?
@@ -46,24 +46,39 @@ Nothing here is a judgement call. Every number is a count over text already on
 disk: no grader, no model in the loop. The output ranks candidates for you;
 it does not decide what a tic is, and it cannot.
 
-### What the method found
+### Why there is no results table
 
-Results from one author's 45-day transcript corpus, measured 2026-08-13 with
-the transcript baseline, all of which a wordlist would have got backwards:
+Earlier versions of this README published ratios measured on the reference
+author's transcripts. They are withdrawn, because reviews kept finding more of
+the model's own writing counted as the author's.
 
-| Measured | Result | What a wordlist does |
-|---|---|---|
-| Mean sentence length | 13.89 model vs **13.85** author | Fails builds over 16 |
-| Em dash | **1.0x**, identical rates | Treats it as the signature tell |
-| The slop lexicon (*delve*, *crucial*, …) | **0.6x**: the *author* used them more | Flags them as machine-written |
-| `not_x_but_y` ("it's not A, it's B") | **7.7x** | Not on any list |
-| `method_defence` (defending the method instead of stating the finding) | **10.0x** | Not on any list |
+A transcript records who delivered each message to the session, not who wrote
+it. Claude Code flags two kinds of user record it wrote itself: slash-command
+expansions and similar (`isMeta`), and the summaries it writes when it compacts
+a conversation (`isCompactSummary`). This tool drops both, and drops records it
+recognises by their content too: harness notices, hook output, messages another
+session's model sent, and whole scheduled-run sessions. Whatever it does not
+recognise counts as the author. On the reference author's 45-day window ending
+2026-09-13, after every exclusion the tool makes, about a quarter of the words
+left as "the author" were prompts the model had drafted for sessions the author
+launched, and nearly a fifth more were in turns whose opening text recurred at
+the start of five or more sessions, which the author may or may not have typed
+each time. Each correction moved the headline ratios, some of them several
+times over.
 
-The two that separated are not in any public list. The three everyone gates on
-did not separate at all. That asymmetry is the whole point.
+So the method stands and the published numbers do not. Measure your own
+corpus, and read a transcript baseline as the most it could be yours, not as
+what is: the report counts what it recognised as someone else's writing and
+dropped, and cannot count what it did not recognise. Where you can, use
+`--baseline-from` on documents you wrote unaided (below).
 
-Sentence length is therefore **reported and can never fail a run** in
-`prose_lint`. The em-dash rule ships **off**.
+Sentence length is **reported and can never fail a run** in `prose_lint`: a
+length threshold measures register, a linter runs on documents, and a chat
+baseline says nothing about the register of your documents. The same objection
+reaches every default rule, since each was chosen on a chat baseline and runs
+on documents; `--baseline-from` is the better test of a rule you mean to
+enforce. The em-dash rule
+ships **off**: it is one author's rule about lone dashes, not a measurement.
 
 ## Two baselines, and what each one costs
 
@@ -136,8 +151,9 @@ parent config it did not read; pass `--config` to use that file.
 What lives in the config is what is a fact about **you**: your signature
 phrases, where your writing is, which detectors may fail your build, the
 domains you do not need redacted. What lives in the code is what is a claim
-about the **model**: the structure detectors, each with its measured ratio
-recorded beside it, in version control where a change is reviewable.
+about the **model**: the structure detectors, in version control where a
+change is reviewable. The default lint rules were chosen on the measurements
+this README has withdrawn, so treat them as a starting point, not a finding.
 
 Unknown keys are an error, not a shrug. A misspelled key that gets silently
 ignored is a setting you believe is in force and is not.
@@ -156,8 +172,8 @@ Exit codes: `0` clean or warnings only, `1` any error (or any warning under
 
 ### Banning a phrase you are sick of
 
-Every rule above earned its place by measuring. This one does not, and that is
-deliberate:
+The rules above were chosen by measuring, on figures since withdrawn (see
+above). This one is your own list, with no measurement behind it:
 
 ```toml
 [lint]
@@ -201,11 +217,20 @@ your transcripts.**
   would need a different reader; `read_turns` is the seam.
 - Sample files are read as UTF-8 markdown or plain text. One unreadable file
   is counted and skipped, never fatal.
+- The transcript baseline is only as clean as the harness's own flags and the
+  markers this tool knows. Records flagged `isMeta` or `isCompactSummary` and
+  harness notices are dropped and counted; cross-session messages are cut out,
+  or dropped with their record when a tag is left over, and counted. A user
+  record it does not recognise is counted as yours whoever wrote it: a session
+  prompt a model drafted and you launched, a template you run repeatedly, text
+  you pasted. On the reference author's 45-day window ending 2026-09-13,
+  spawned-session prompts alone were 10,643 of the 44,314 author words the
+  report kept.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged
   sentence, a false one costs trust in every other row. Widening it would also
-  invalidate the 7.7x measurement recorded beside it.
+  change every ratio anyone has measured with it.
 - The `rule_of_three_no_oxford` detector is low precision and is labelled as
   such in the output. It mostly catches clause coordination.
 - `prose_lint` misses a table row that opens with an HTML tag and ends with a

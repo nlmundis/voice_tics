@@ -1,48 +1,58 @@
 #!/usr/bin/env python3
-"""Lint a document for the model tics that measurement actually confirmed.
+"""Lint a document for model tics chosen by measuring against a matched baseline.
 
-Every rule here earned its place by separating the model from a human author
-on a matched corpus. Nothing is here because it sounds robotic.
+Every default structure rule here was chosen on ratios measured against a
+human author on a matched corpus, not because it sounds robotic. Those
+measurements have since been withdrawn (see the README: the transcript
+baseline counted some of the model's writing as the author's), so the defaults
+are a starting point. Measure your own before you rely on them.
 
 WHAT IS DELIBERATELY ABSENT, AND WHY
-    * **Any sentence-length or readability threshold.** The measurement that
-      motivated this tool found mean sentence length does not separate the two
-      writers at all: 13.89 words for the model against 13.85 for the author
-      (45-day corpus). A length gate therefore lints an ACADEMIC REGISTER —
-      long compound-complex sentences, passive voice, "However" — and deletes
-      it. The tool that did exactly that to the reference author drew this
-      summary from him: "we essentially made me sound simpler so I don't sound
-      like AI." Sentence length is REPORTED here and can never fail a run.
+    * **Any sentence-length or readability threshold.** A length threshold
+      measures register, not authorship. This linter runs on documents, and
+      a chat baseline says nothing about how long the author's document
+      sentences are. A length
+      gate lints an ACADEMIC REGISTER — long compound-complex sentences,
+      passive voice, "However" — and deletes it. The tool that did exactly
+      that to the reference author drew this summary from him: "we
+      essentially made me sound simpler so I don't sound like AI." Sentence
+      length is REPORTED here and can never fail a run.
 
-    * **The slop lexicon** ("delve", "crucial", …): measured at 0.6x, meaning
-      the AUTHOR used those words more often than the model did. A lexicon
-      rule would correct the wrong writer.
+    * **The slop lexicon** ("delve", "crucial", …): a list of words somebody
+      decided sound robotic. For an author whose register overlaps it, a
+      lexicon rule flags the author as readily as the model, and only a
+      matched baseline can say which of the two you are.
 
-    * **The chat-register family** ("let me check", "want me to"): the largest
-      measured tics by far, and useless here, because none of them can appear
-      in a document. A document linter carrying them would report clean runs
-      as a property of the register rather than of the prose.
+    * **The chat-register family** ("let me check", "want me to"): useless
+      here, because none of them can appear in a document. A document linter
+      carrying them would report clean runs as a property of the register
+      rather than of the prose.
 
 WHAT FAILS A RUN INSTEAD
-    Structures, at the model's measured ratios (per 10k words, model over
-    baseline, 45-day matched corpus). Which keys are in force is config;
-    these are the shipped defaults:
+    Structures. ``TIC_PROVENANCE`` below records why each default is in its
+    tier. Which keys are in force is config; these are the shipped defaults:
 
-    * ``method_defence`` — 10.0x. Defending the method instead of stating the
-      finding. It reaches documents through model drafts rather than through
-      the author's own writing, so flagging it corrects the right author.
-    * ``not_x_but_y`` — 7.7x. The explicit "it's not A, it's B" reveal.
-    * ``appositive_negation`` — 2.4x, a WARNING rather than an error: it is
-      model-heavier but genuinely shared, so an occurrence is a prompt to
-      look, not proof of a draft. ``--strict`` promotes warnings to failures.
+    * ``method_defence``: defending the method instead of stating the
+      finding.
+    * ``not_x_but_y``: the explicit "it's not A, it's B" reveal.
+    * ``appositive_negation``: a WARNING rather than an error, so an
+      occurrence is a prompt to look, not proof of a draft. ``--strict``
+      promotes warnings to failures.
+
+    Each was put in its tier on ratios that have since been withdrawn, so
+    the tiers are a starting point, not a finding about who writes what.
 
     A lone em dash is available as a rule and ships OFF. It is one author's
-    punctuation preference, and on the reference corpus the em-dash rates were
-    identical (1.0x) — the most-cited AI tell in public advice, and it did not
-    survive measurement. Turn it on only if your own ratio says something.
+    punctuation preference about LONE dashes, not a measurement of a rate.
+    Turn it on if your own measurement and your own style both say so.
+
+    Every default structure rule here was measured against a chat baseline and
+    runs on documents, the same objection a length threshold faces.
+    ``--baseline-from`` in voice_tics.py measures against documents instead,
+    which is the better test of a rule you mean to enforce on documents.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
-    Those ratios come from one author and one corpus. Run ``voice_tics.py``
+    The defaults were chosen on one author's corpus. Run ``voice_tics.py``
     against your own transcripts or your own writing, read the STRUCTURES
     table, and set ``[lint] error`` from what separates for YOU. Shipping this
     file's defaults unexamined is the same mistake as shipping a wordlist,
@@ -77,22 +87,28 @@ import vt_config as config_mod
 import emdash
 import voice_tics
 
-# Why each DEFAULT tier key is in the tier it is in, as a rate ratio of
-# model-over-baseline on the reference corpus (45 days, 2026-08-13). Kept
-# beside the keys so a future re-tiering starts from the number that put them
-# there rather than from taste, and so anyone can see the defaults are a
-# measurement someone took and not a preference someone had.
+# Why each DEFAULT tier key is in the tier it is in. The tiers were chosen on
+# ratios measured against the reference author's transcripts, and those ratios
+# are withdrawn (README): the baseline counted some of the model's writing as
+# the author's. So no figure is kept here. A ratio in this table would have to
+# be a dated measurement file committed under docs, which tests/test_repo.py
+# recomputes; until a baseline is trusted, there is none to cite.
 #
 # Which keys are actually in force is ``[lint] error`` and ``[lint] warn``,
 # defaulting to config.DEFAULT_ERROR_TICS and DEFAULT_WARN_TICS. This table is
 # documentation, not membership; ``tests/test_prose_lint.py`` pins that every
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
-    "method_defence": "10.0x model/baseline, 2026-08-13",
-    "not_x_but_y": "7.7x model/baseline, 2026-08-13",
+    "method_defence":
+        "error: defending the method instead of stating the finding; chosen "
+        "on withdrawn ratios, so re-measure before relying on the tier",
+    "not_x_but_y":
+        "error: the explicit reveal template; chosen on withdrawn ratios "
+        "that rested on one author use or none, so re-measure before "
+        "relying on the tier",
     "appositive_negation":
-        "2.4x model/baseline, 2026-08-13 — shared, model-heavier, so a "
-        "warning rather than an error",
+        "warning: a prompt to look rather than an error; chosen on withdrawn "
+        "ratios, so re-measure before relying on the tier",
 }
 
 EXCERPT_CAP = 60
@@ -355,9 +371,9 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
 
 
 INFO_NOTE = (
-    "reported, never a failure: mean sentence length does not separate "
-    "model from author (13.89 vs 13.85, 2026-08-13), so a threshold here "
-    "would lint the author's register, not the machine's"
+    "reported, never a failure: a sentence-length threshold measures "
+    "register, not authorship, so it would lint the author's register, not "
+    "the machine's (see the README)"
 )
 
 
@@ -387,7 +403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point; returns the process exit code."""
     ap = argparse.ArgumentParser(
         description="Lint a document for measured model tics "
-                    "(no sentence-length threshold, by measurement)")
+                    "(no sentence-length threshold: length measures register)")
     ap.add_argument("files", nargs="+", metavar="FILE",
                     help="markdown/text files to lint, or - for stdin")
     ap.add_argument("--strict", action="store_true",

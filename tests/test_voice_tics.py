@@ -427,9 +427,182 @@ class ReadTurnsTest(unittest.TestCase):
         ])
         self.assertEqual(stats.get("meta_records"), 2)
 
+    def test_a_compaction_summary_is_not_the_authors_prose(self) -> None:
+        """The harness stores the model's compaction summary as a USER
+        record. Counted as the author, summaries held half of one 45-day
+        baseline's words. The fixture sets isCompactSummary alone, so a
+        filter keyed on any other flag fails here."""
+        summary = json.loads(_rec(
+            "user", "This session is being continued from a previous "
+                    "conversation. The work so far — summarised."))
+        summary["isCompactSummary"] = True
+        stats = self._stats([
+            _rec("user", "please carry on"),
+            json.dumps(summary),
+            _rec("assistant", "Carrying on."),
+        ])
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
+        self.assertNotIn("summarised", " ".join(t.text for t in self.turns))
+        self.assertEqual(stats.get("compact_summaries"), 1)
+
+    def test_the_report_says_how_many_summaries_were_dropped(self) -> None:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        report = vt.render(mine, theirs, [], structures, 0, False,
+                           stats={"sessions": 1, "compact_summaries": 3})
+        self.assertIn("3 compaction summaries", report)
+
+    def test_a_summary_still_marks_a_scheduled_session(self) -> None:
+        summary = json.loads(_rec("user", "This is a scheduled task. Summary."))
+        summary["isCompactSummary"] = True
+        stats = self._stats([json.dumps(summary),
+                             _rec("assistant", "Alpha beta.")])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("automated_sessions"), 1)
+
     def test_a_dropped_notice_is_counted(self) -> None:
         stats = self._stats([_rec("assistant", "API Error: 500", model="m")])
         self.assertEqual(stats.get("noise_records"), 1)
+
+    def test_a_harness_notice_in_a_user_record_is_counted(self) -> None:
+        stats = self._stats([_rec("user", "<task-notification>done"
+                                          "</task-notification>"),
+                             _rec("user", "the words he typed")])
+        self.assertEqual([t.text for t in self.turns], ["the words he typed"])
+        self.assertEqual(stats.get("noise_records"), 1)
+
+    CROSS = ('<cross-session-message from="a1b2" name="Other session">'
+             "Here is the finding — reply when done.</cross-session-message>")
+
+    def test_a_cross_session_message_is_not_the_authors_prose(self) -> None:
+        """Another session's model wrote it; the harness delivers it as a
+        user record with no flag."""
+        stats = self._stats([_rec("user", self.CROSS),
+                             _rec("user", "please carry on")])
+        self.assertEqual([t.text for t in self.turns], ["please carry on"])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_text_typed_beside_a_cross_session_message_is_kept(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS + "\nthanks, go ahead")])
+        self.assertEqual(len(self.turns), 1)
+        self.assertIn("go ahead", self.turns[0].text)
+        self.assertNotIn("finding", self.turns[0].text)
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_a_typed_mention_of_the_tag_is_the_authors_prose(self) -> None:
+        """Only the harness writes the from attribute; an author discussing
+        the tag is still the author."""
+        stats = self._stats([_rec("user", "why does <cross-session-message> "
+                                          "reach my baseline at all")])
+        self.assertEqual(len(self.turns), 1)
+        self.assertNotIn("cross_session_messages", stats)
+
+    def test_a_quoted_close_tag_does_not_leak_the_rest_of_a_message(self) -> None:
+        """A message quoting the close tag ends the non-greedy match early;
+        what follows is still the other session's text."""
+        quoting = ('<cross-session-message from="a1b2">The tag ends with '
+                   "</cross-session-message> and then more of the message."
+                   "</cross-session-message>")
+        stats = self._stats([_rec("user", quoting)])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_text_typed_between_two_messages_is_kept(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS + "\nyes, merge it\n"
+                                          + self.CROSS)])
+        self.assertEqual([t.text.strip() for t in self.turns], ["yes, merge it"])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_a_notice_beside_a_cross_session_message_drops_the_record(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS
+                                  + "\n[Request interrupted by user]")])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+        self.assertNotIn("noise_records", stats)
+
+    def test_a_marker_quoted_by_another_session_keeps_yours(self) -> None:
+        """The marker test reads your text after the message is cut out."""
+        quoting = ('<cross-session-message from="a1b2">This is a scheduled '
+                   "task.</cross-session-message>\nplease look at this")
+        stats = self._stats([_rec("user", quoting),
+                             _rec("assistant", "Looking.")])
+        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
+
+    def test_a_record_with_no_timestamp_is_inside_the_window(self) -> None:
+        undated = json.loads(_rec("user", "x", meta=True))
+        del undated["timestamp"]
+        kept = json.loads(_rec("user", "undated words"))
+        del kept["timestamp"]
+        stats = self._stats([json.dumps(undated), json.dumps(kept)],
+                            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc))
+        self.assertEqual([t.text for t in self.turns], ["undated words"])
+        self.assertEqual(stats.get("meta_records"), 1)
+
+    def test_an_unclosed_cross_session_message_drops_the_record(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS.split("</")[0])])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("cross_session_messages"), 1)
+
+    def test_a_flagged_record_is_counted_once_as_flagged(self) -> None:
+        stats = self._stats([_rec("user", self.CROSS, meta=True)])
+        self.assertEqual(stats.get("meta_records"), 1)
+        self.assertNotIn("cross_session_messages", stats)
+
+    def test_exclusions_before_the_window_are_not_counted(self) -> None:
+        """A record the date cutoff drops anyway was never in the window, so
+        counting it reported exclusions the window did not contain."""
+        old = "2026-01-01T10:00:00.000Z"
+        summary = json.loads(_rec("user", "Summary.", ts=old))
+        summary["isCompactSummary"] = True
+        stats = self._stats(
+            [json.dumps(summary), _rec("user", "x", meta=True, ts=old),
+             _rec("user", self.CROSS, ts=old),
+             _rec("assistant", "Alpha.", model="<synthetic>", ts=old),
+             _rec("assistant", "Beta.", sidechain=True, ts=old),
+             _rec("assistant", "Gamma.", model="other", ts=old),
+             _rec("assistant", "API Error: 500", model="m", ts=old),
+             _rec("user", "<task-notification>x</task-notification>", ts=old),
+             _rec("user", "in the window")],
+            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc), model="m")
+        self.assertEqual([t.text for t in self.turns], ["in the window"])
+        self.assertEqual(stats.get("turns"), 1)
+        for key in ("compact_summaries", "meta_records", "synthetic_records",
+                    "cross_session_messages", "sidechain_records",
+                    "model_filtered", "noise_records"):
+            self.assertNotIn(key, stats)
+
+    def test_a_subagent_record_is_counted(self) -> None:
+        stats = self._stats([_rec("assistant", "Alpha.", sidechain=True),
+                             _rec("user", "a prompt", sidechain=True)])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("sidechain_records"), 2)
+
+    def test_a_dropped_scheduled_run_is_not_counted_twice(self) -> None:
+        """Its records are reported as one automated session, not also as
+        exclusions."""
+        stats = self._stats([_rec("user", "x", meta=True),
+                             _rec("user", "This is a scheduled task. Go.")])
+        self.assertEqual(stats.get("automated_sessions"), 1)
+        self.assertNotIn("meta_records", stats)
+
+    def test_the_report_names_every_exclusion_counter(self) -> None:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        counts = {"meta_records": 11, "compact_summaries": 12,
+                  "cross_session_messages": 13, "synthetic_records": 14,
+                  "noise_records": 15, "sidechain_records": 16,
+                  "model_filtered": 17}
+        report = vt.render(mine, theirs, [], structures, 0, False,
+                           stats={"sessions": 1, **counts})
+        line = next(l for l in report.splitlines()
+                    if l.startswith("Excluded records:"))
+        for phrase in ("11 harness-composed (isMeta)", "12 compaction summaries",
+                       "13 with cross-session messages cut out",
+                       "14 synthetic", "15 harness notices", "16 subagent",
+                       "17 other-model"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, line)
 
     def test_a_timestamp_without_an_offset_is_utc_not_a_crash(self) -> None:
         stats = self._stats(
@@ -879,7 +1052,7 @@ class BaselineFloorTest(unittest.TestCase):
         return float(row.split("x")[0])
 
     def test_a_structure_the_baseline_never_uses_is_not_zero(self) -> None:
-        """Without the floor the strongest possible tic printed 0.0x."""
+        """Without the floor the strongest possible tic printed a zero ratio."""
         self.assertEqual(self._structure_ratio(0), 20.0)
 
     def test_never_said_ranks_above_said_once(self) -> None:
