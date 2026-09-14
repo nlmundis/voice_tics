@@ -74,14 +74,12 @@ def _toml_module() -> Any:
 DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 
 # Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
-# two are the defaults because they are the ones whose measured separation was
-# large enough to act on. The ratios themselves live in the README table and
-# ``prose_lint.TIC_PROVENANCE``, which tests/test_repo.py holds cell for cell,
-# and are deliberately not repeated here: an unchecked copy of a measurement is
-# how one of them goes stale (this comment once carried method_defence's figure
-# for the detector before it was sharpened, after every other copy had moved
-# on). They are still only a
-# default: the whole argument of this tool is that you should measure your own.
+# two were chosen as the defaults on figures later found to count the model's
+# compaction summaries as the author's writing; the corrected measurements are
+# in docs/measurements and the README table, which tests/test_repo.py holds
+# together, and they are deliberately not repeated here. An unchecked copy of a
+# measurement is how one of them goes stale. They are still only a default:
+# the whole argument of this tool is that you should measure your own.
 DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
 
 # Model-heavier but genuinely shared, so an occurrence is a prompt to look

@@ -3,9 +3,8 @@
 The case that matters most is the one the re-aim exists for: a long,
 passive, "However"-led academic sentence must produce ZERO findings. The
 predecessor failed builds at mean sentence length over 16, and the matched
-baseline showed that threshold detects the author's register, not the model:
-mean sentence length stayed inside the parity band on both measured dates (see
-the README table). If anyone re-adds a length gate, the
+baseline showed that a length threshold measures register, not authorship (see
+the README). If anyone re-adds a length gate, the
 academic-register test here goes red — that is its job, not decoration.
 
 The second case that carries weight is line numbers across a code fence. The

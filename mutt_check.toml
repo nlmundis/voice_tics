@@ -701,36 +701,77 @@ file = "prose_lint.py"
 find = '''        "." if emdash.is_table_row(plain) else raw'''
 replace = '''        "" if emdash.is_table_row(plain) else raw'''
 
-# --- measured figures: one table, one provenance, held cell for cell -------
+# --- measured figures: recomputed from docs/measurements --------------------
+# These anchor on the current figures, so a re-measure must re-aim them; the
+# anchor test names the stale one.
 
 [[mutant]]
-name = "provenance_reverted_to_the_august_figure"
-why = "With both dates in the README, a whole-file substring check passed a note put back to its old figure."
+name = "provenance_disagrees_with_the_counts"
+why = "A figure no test recomputes is how 1.0x sat in the README with no measurement behind it."
 suites = ["tests.test_repo.DocsTest"]
 file = "prose_lint.py"
-find = '        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); "'
-replace = '        "10.0x model/baseline, 2026-09-13 (345 / 10 uses); "'
+find = '        "2.3x model/baseline, 2026-09-13 (345 / 8 uses); "'
+replace = '        "3.8x model/baseline, 2026-09-13 (345 / 8 uses); "'
 
 [[mutant]]
-name = "readme_counts_drift_from_the_code"
-why = "The counts are what tell a reader a ratio rests on two uses; a drifted count misstates how much to trust it."
+name = "readme_cell_disagrees_with_the_counts"
+why = "The counts are what tell a reader a ratio rests on two uses; a cell that drifts misstates how far to trust it."
 suites = ["tests.test_repo.DocsTest"]
 file = "README.md"
-find = "| 10.0x (134 / 2) |"
-replace = "| 10.0x (134 / 3) |"
+find = "| 7.4x (4,675 / 35) |"
+replace = "| 2.3x (4,675 / 35) |"
+
+[[mutant]]
+name = "measurement_file_edited_without_the_table"
+why = "The measurement file is the source; a count changed there must fail until the table follows."
+suites = ["tests.test_repo.DocsTest"]
+file = "docs/measurements/2026-09-13.json"
+find = '      "model": 14747,'
+replace = '      "model": 14748,'
 
 [[mutant]]
 name = "substring_of_a_larger_ratio_passes"
 why = "'12.4x' contains '2.4x'; a substring match let the wrong figure through."
 suites = ["tests.test_repo.DocsTest"]
 file = "prose_lint.py"
-find = '        "12.4x model/baseline, 2026-09-13 (113 / 1 uses); "'
-replace = '        "2.4x model/baseline, 2026-09-13 (113 / 1 uses); "'
+find = '        "5.9x model/baseline, 2026-09-13 (113 / 1 uses); "'
+replace = '        "15.9x model/baseline, 2026-09-13 (113 / 1 uses); "'
 
 [[mutant]]
 name = "measured_ratio_copied_into_a_docstring"
 why = "An unchecked copy is how 1.0x sat in four files with no measurement behind it, each looking like corroboration."
 suites = ["tests.test_repo.DocsTest"]
 file = "emdash.py"
-find = "does separate, but only about as much as the warning-tier"
-replace = "does separate (2.3x), but only about as much as the warning-tier"
+find = "the model writes far more em dashes than the author does (README table)."
+replace = "the model writes far more em dashes than the author does (7.7x)."
+
+[[mutant]]
+name = "integer_ratio_copied_into_a_comment"
+why = "A copy written '8x' instead of '7.7x' is still a copy; the guard must not key on one spelling."
+suites = ["tests.test_repo.DocsTest"]
+file = "vt_config.py"
+find = "# measurement is how one of them goes stale."
+replace = "# measurement is how one of them goes stale (the em dash is 8x)."
+
+[[mutant]]
+name = "compaction_summary_counted_as_the_author"
+why = "The model writes the compaction summary; counted as the author it held 52% of a 45-day baseline and read a 7.7x em dash as 1.8x."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                    if rec.get("isCompactSummary"):'
+replace = "                    if False:"
+
+[[mutant]]
+name = "compaction_summaries_dropped_uncounted"
+why = "Every other exclusion is reported; an uncounted one hides how much of the baseline was model text."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = '                        _count(stats, "compact_summaries")'
+replace = "                        pass"
+[[mutant]]
+name = "undated_ratio_hidden_in_the_provenance"
+why = "The provenance literal is exempt from the copy guard, so a ratio there with no date and counts would be checked by nothing."
+suites = ["tests.test_repo.DocsTest"]
+file = "prose_lint.py"
+find = '        "so the ratio is unstable",'
+replace = '        "so the ratio is unstable; once 12.4x",'

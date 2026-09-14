@@ -2,23 +2,19 @@
 
 The rule this implements — an em dash is allowed only as a MATCHED PAIR
 bracketing a mid-sentence aside, and a lone dash should be a colon, a comma,
-a semicolon or a new sentence — is ONE AUTHOR'S, not a measured model tic.
-That is why ``[lint.emdash] enabled`` is false by default.
+a semicolon or a new sentence — is ONE AUTHOR'S punctuation rule. It is not a
+measurement, which is why ``[lint.emdash] enabled`` is false by default.
 
 WHY IT SHIPS ANYWAY
     The em dash is the single most-cited "AI tell" in public advice, which
-    makes it a good test of this repo's argument. On the reference corpus it
-    does separate, but only about as much as the warning-tier
-    ``appositive_negation`` (figures in the README table), and the author
-    writes hundreds of them too. A wordlist tool treats it as the signature
-    tell and fails the build on it; the matched baseline says it is a weak,
-    shared signal, and a lone-dash rule run over the author's own turns fires
-    hundreds of times.
+    makes it a good test of this repo's argument that every tell has to be
+    measured before anyone acts on it. On the reference corpus the tell holds:
+    the model writes far more em dashes than the author does (README table).
+    That supports looking at a draft's em dashes. It does not make "no lone
+    dashes" anyone's rule but the author's.
 
-    So the useful thing this module does for most people is not failing their
-    build. It is putting a number on the tell before they act on it. Run
-    ``voice_tics.py`` first, read the ``em_dash_aside`` row, and turn this on
-    only if YOUR ratio says something.
+    So run ``voice_tics.py`` first, read the ``em_dash_aside`` row, and turn
+    this on if YOUR ratio and your own style both say so.
 
 WHAT IT DOES NOT CATCH
     A matched pair used where a colon would read better. That is style, not

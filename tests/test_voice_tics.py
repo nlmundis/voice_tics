@@ -427,6 +427,32 @@ class ReadTurnsTest(unittest.TestCase):
         ])
         self.assertEqual(stats.get("meta_records"), 2)
 
+    def test_a_compaction_summary_is_not_the_authors_prose(self) -> None:
+        """The harness stores the model's compaction summary as a USER
+        record. Counted as the author, it held half a 45-day baseline and
+        read a 7.7x em dash as 1.8x."""
+        summary = json.loads(_rec(
+            "user", "This session is being continued from a previous "
+                    "conversation. The work so far — summarised."))
+        summary["isCompactSummary"] = True
+        summary["isVisibleInTranscriptOnly"] = True
+        stats = self._stats([
+            _rec("user", "please carry on"),
+            json.dumps(summary),
+            _rec("assistant", "Carrying on."),
+        ])
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
+        self.assertNotIn("summarised", " ".join(t.text for t in self.turns))
+        self.assertEqual(stats.get("compact_summaries"), 1)
+
+    def test_a_summary_still_marks_a_scheduled_session(self) -> None:
+        summary = json.loads(_rec("user", "This is a scheduled task. Summary."))
+        summary["isCompactSummary"] = True
+        stats = self._stats([json.dumps(summary),
+                             _rec("assistant", "Alpha beta.")])
+        self.assertEqual(self.turns, [])
+        self.assertEqual(stats.get("automated_sessions"), 1)
+
     def test_a_dropped_notice_is_counted(self) -> None:
         stats = self._stats([_rec("assistant", "API Error: 500", model="m")])
         self.assertEqual(stats.get("noise_records"), 1)

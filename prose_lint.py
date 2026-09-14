@@ -5,19 +5,21 @@ Every rule here earned its place by separating the model from a human author
 on a matched corpus. Nothing is here because it sounds robotic.
 
 WHAT IS DELIBERATELY ABSENT, AND WHY
-    * **Any sentence-length or readability threshold.** The measurement that
-      motivated this tool found mean sentence length does not separate the two
-      writers: on both measured dates it stayed inside the tool's own parity
-      band (see the README table). A length gate therefore lints an ACADEMIC
-      REGISTER — long compound-complex sentences, passive voice, "However" —
-      and deletes it. The tool that did exactly that to the reference author drew this
-      summary from him: "we essentially made me sound simpler so I don't sound
-      like AI." Sentence length is REPORTED here and can never fail a run.
+    * **Any sentence-length or readability threshold.** A length threshold
+      measures register, not authorship. On the reference corpus the model's
+      sentences run somewhat longer than the author's CHAT turns (README
+      table), but this linter runs on documents, and a chat baseline says
+      nothing about how long the author's document sentences are. A length
+      gate lints an ACADEMIC REGISTER — long compound-complex sentences,
+      passive voice, "However" — and deletes it. The tool that did exactly
+      that to the reference author drew this summary from him: "we
+      essentially made me sound simpler so I don't sound like AI." Sentence
+      length is REPORTED here and can never fail a run.
 
-    * **The slop lexicon** ("delve", "crucial", …): measured below parity, then
-      at it (see the README table), meaning the author uses those words at
-      least as often as the model does. A lexicon rule would flag the author
-      as readily as the model.
+    * **The slop lexicon** ("delve", "crucial", …): on the reference corpus the
+      AUTHOR uses those words more often than the model does, on both
+      measured dates (README table, on a handful of uses). A lexicon rule
+      would flag the author before the model.
 
     * **The chat-register family** ("let me check", "want me to"): the largest
       measured tics by far, and useless here, because none of them can appear
@@ -39,12 +41,11 @@ WHAT FAILS A RUN INSTEAD
       model-heavier but genuinely shared, so an occurrence is a prompt to
       look, not proof of a draft. ``--strict`` promotes warnings to failures.
 
-    A lone em dash is available as a rule and ships OFF. The em dash does
-    separate on the reference corpus, about as much as the warning-tier
-    ``appositive_negation``, but the rule is one author's punctuation
-    preference: it flags lone dashes, not a rate, and it fires on the
-    author's own turns hundreds of times in a 45-day window. Turn it on only
-    if your own measurement says something.
+    A lone em dash is available as a rule and ships OFF. The em dash itself
+    separates strongly on the reference corpus (README table), but the rule
+    is one author's punctuation preference about LONE dashes, not a
+    measurement of a rate. Turn it on if your own measurement and your own
+    style both say so.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     Those ratios come from one author and one corpus. Run ``voice_tics.py``
@@ -82,14 +83,17 @@ import vt_config as config_mod
 import emdash
 import voice_tics
 
-# Why each DEFAULT tier key is in the tier it is in, as a rate ratio of
-# model-over-baseline on the reference corpus (45-day windows, measured
-# 2026-08-13 with the private original and 2026-09-13 with this repo), with
-# the model / author uses each ratio rests on. tests/test_repo.py checks every
-# figure here against the README table's cell for the same key and date. Kept
-# beside the keys so a future re-tiering starts from the number that put them
-# there rather than from taste, and so anyone can see the defaults are a
-# measurement someone took and not a preference someone had.
+# The measurement behind each DEFAULT tier key, as a rate ratio of
+# model-over-baseline on the reference corpus (45-day windows ending 2026-08-13
+# and 2026-09-13, this repo's code), with the model / author uses each ratio
+# rests on. tests/test_repo.py recomputes every figure here from
+# docs/measurements and checks it against the README table. Kept beside the
+# keys so a future re-tiering starts from a number rather than from taste.
+#
+# The tiers themselves were chosen on earlier figures that counted the model's
+# compaction summaries as the author's writing. These corrected figures do not
+# rank them the same way: on 2026-08-13 the warning appositive_negation
+# separates more than the error method_defence.
 #
 # Which keys are actually in force is ``[lint] error`` and ``[lint] warn``,
 # defaulting to config.DEFAULT_ERROR_TICS and DEFAULT_WARN_TICS. This table is
@@ -97,15 +101,15 @@ import voice_tics
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
     "method_defence":
-        "3.8x model/baseline, 2026-09-13 (345 / 10 uses); "
-        "10.0x on 2026-08-13 (134 / 2 uses)",
+        "2.3x model/baseline, 2026-09-13 (345 / 8 uses); "
+        "2.3x on 2026-08-13 (81 / 2 uses)",
     "not_x_but_y":
-        "12.4x model/baseline, 2026-09-13 (113 / 1 uses); "
-        "7.7x on 2026-08-13 (52 / 1 uses); one author use on both dates, "
+        "5.9x model/baseline, 2026-09-13 (113 / 1 uses); "
+        "4.7x on 2026-08-13 (42 / 0 uses); one author use or none, "
         "so the ratio is unstable",
     "appositive_negation":
-        "1.7x model/baseline, 2026-09-13 (2,462 / 157 uses); "
-        "2.3x on 2026-08-13 (1,146 / 74 uses); shared, model-heavier, so a "
+        "1.7x model/baseline, 2026-09-13 (2,462 / 77 uses); "
+        "4.4x on 2026-08-13 (713 / 9 uses); shared, model-heavier, so a "
         "warning rather than an error",
 }
 
@@ -369,10 +373,9 @@ def lint_text(text: str, cfg: Optional[config_mod.Config] = None
 
 
 INFO_NOTE = (
-    "reported, never a failure: mean sentence length stayed inside the "
-    "parity band between model and author on both measured dates (see the "
-    "README), so a threshold here would lint the author's register, not the "
-    "machine's"
+    "reported, never a failure: a sentence-length threshold measures "
+    "register, not authorship, so it would lint the author's register, not "
+    "the machine's (see the README)"
 )
 
 

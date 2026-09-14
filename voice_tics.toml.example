@@ -52,9 +52,8 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # Note what it is FOR: these are the words a generic AI-slop detector would
 # flag as machine-written. Measuring them against the model is how you find out
 # that they are yours, and that a wordlist would have deleted your voice. On
-# the reference corpus that lexicon measured below parity and then at it (see
-# the README table): the author used those words at least as often as the
-# model.
+# the reference corpus the author used that lexicon more often than the model
+# did (see the README table).
 #
 # Keep the provenance split when you fill this in. Some entries will be things
 # you KNOW about your writing; others will be hypotheses. A ratio near 1.0 on a
@@ -127,11 +126,10 @@ transcripts = "~/.claude/projects/*/*.jsonl"
 # A lone em dash outside a matched pair.
 #
 # OFF by default, on purpose. The em dash is the most-cited AI tell in public
-# advice. On the reference corpus it separates only about as much as the
-# warning-tier appositive_negation (see the README table), the author writes
-# hundreds of them, and this rule flags lone dashes rather than a rate: run
-# over the author's own turns it fires hundreds of times. It is one author's
-# punctuation rule, not a measured tic.
+# advice, and on the reference corpus it holds: the model writes far more of
+# them than the author (see the README table). But this rule is about LONE
+# dashes, which is one author's punctuation preference rather than a
+# measurement, so it waits for you to opt in.
 #
 # Measure yours before turning this on.
 enabled = false

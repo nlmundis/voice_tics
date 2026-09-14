@@ -48,54 +48,63 @@ it does not decide what a tic is, and it cannot.
 
 ### What the method found
 
-One author, measured twice a month apart. Both runs take a 45-day window of
-Claude Code transcripts, rank the model against the author's own turns in the
-same files, and blend every model in the window.
+One author, measured on two 45-day windows a month apart, both with this
+repo's code: the model ranked against the author's own turns in the same
+transcripts, every model in the window blended.
 
-- **2026-08-13**, the private tool this repo was extracted from: 233
-  transcripts read, 134 of them dropped whole as scheduled runs, leaving
-  381,274 words of model prose against 56,715 of the author's.
-- **2026-09-13**, this repo: 563 transcripts read, 257 dropped as scheduled
-  runs, leaving 885,083 words against 96,897.
+- **2026-09-13**: 563 transcripts read, 257 dropped whole as scheduled runs,
+  leaving 885,083 words of model prose against 46,410 of the author's.
+- **2026-08-13**: rebuilt from the part of that window still on disk, since
+  older transcripts are pruned: 232,921 words of model prose, about three
+  fifths of what the original run saw, against 12,991 of the author's.
 
 Ratios are the model's rate over the author's. In brackets are the uses each
-ratio rests on, model / author.
+ratio rests on, model / author; an author count of zero is taken as half a
+use, so the ratio stays finite. The counts behind every cell are in
+[docs/measurements](docs/measurements), and a test recomputes the table from
+them.
 
 | Measured | 2026-08-13 | 2026-09-13 | What a wordlist does |
 |---|---|---|---|
-| Mean sentence length (words) | 14.00 model, 13.92 author | 13.61 model, 12.34 author | Fails builds over 16 |
-| Em dash | 2.3x (7,872 / 505) | 1.8x (14,747 / 922) | Treats it as the signature tell |
-| The slop lexicon (*delve*, *crucial*, …) | 0.6x (54 / 13) | 1.0x (45 / 5) | Flags them as machine-written |
-| `appositive_negation` ("Y, not X") | 2.3x (1,146 / 74) | 1.7x (2,462 / 157) | Not on any list |
-| `not_x_but_y` ("it's not A, it's B") | 7.7x (52 / 1) | 12.4x (113 / 1) | Not on any list |
-| `method_defence` (defending the method instead of stating the finding) | 10.0x (134 / 2) | 3.8x (345 / 10) | Not on any list |
+| Mean sentence length (words) | 14.32 model, 11.42 author | 13.61 model, 12.00 author | Fails builds over 16 |
+| Em dash | 7.4x (4,675 / 35) | 7.7x (14,747 / 100) | Treats it as the signature tell |
+| The slop lexicon (*delve*, *crucial*, …) | 0.5x (26 / 3) | 0.5x (45 / 5) | Flags them as machine-written |
+| `appositive_negation` ("Y, not X") | 4.4x (713 / 9) | 1.7x (2,462 / 77) | Not on any list |
+| `not_x_but_y` ("it's not A, it's B") | 4.7x (42 / 0) | 5.9x (113 / 1) | Not on any list |
+| `method_defence` (defending the method instead of stating the finding) | 2.3x (81 / 2) | 2.3x (345 / 8) | Not on any list |
 
-The two rows that separated most are on no public list, on both dates. Read
-them with their counts: they rest on one and two of the author's uses in
-August and on one and ten in September, so a single further use by the author
-would halve `not_x_but_y` on either date. They are candidates the ratio
-surfaced, not constants.
+The baseline judges each tell on its own, and the folk list does not survive
+as a list. It is wrong about the slop lexicon: the author uses those words
+about twice as often as the model on both dates, though on a handful of uses.
+It is right about the em dash: the model writes it seven to eight times as
+often as the author, on both dates. Sentence length separates weakly, the model's
+sentences running about a quarter longer than the author's chat turns in
+August and an eighth longer in September.
 
-Two of the folk tells did not separate. The slop lexicon ran the author's way
-in August and sat at parity in September, on 13 and then 5 of the author's
-uses. Mean sentence length stayed inside the tool's own parity band, a quarter
-either way, on both dates.
+The structures no list names separate as well, but look at their counts
+first. `not_x_but_y` and `method_defence` rest on almost none of the author's
+uses, so one more use by the author moves them a long way. And
+`appositive_negation` fell from 4.4x to 1.7x between the windows because the
+author's rate more than doubled while the model's barely moved. These are
+candidates the ratio surfaced, not constants, which is the argument for
+measuring your own corpus rather than trusting anyone's table, this one
+included.
 
-The em dash did separate: 2.3x, then 1.8x, on hundreds of the author's uses,
-about as much as `appositive_negation`, which ships only as a warning. The
-em-dash rule ships off anyway, because it is one author's punctuation rule
-rather than a measured tic: it flags lone dashes, not a rate, and on the
-September window it would have raised 803 findings across 68 of the author's
-1,883 turns.
+Earlier versions of this table counted the summaries Claude Code writes when
+it compacts a long conversation as the author's writing: the harness stores
+them as user records. In the September window they held half of the author's
+words and nine in ten of the author's em dashes, which is how the em dash once
+read as a habit the two shared. Rebuilt with that old filter, the surviving
+August transcripts reproduce the original run's em dash and
+`appositive_negation` rows at 2.3x each, so the difference is the filter, not
+the rebuild. The figures in those earlier versions are withdrawn.
 
-Every row moved between the dates, and the code is not why: the private tool,
-run over the September transcripts, gives ratios within 7% of this repo's. The
-transcripts changed, and the two windows share only two weeks. That is the
-best argument this repo has for measuring your own corpus rather than
-trusting anyone's table, this one included.
-
-Sentence length is **reported and can never fail a run** in `prose_lint`. The
-em-dash rule ships **off**.
+Sentence length is **reported and can never fail a run** in `prose_lint`: a
+length threshold measures register, a linter runs on documents, and a chat
+baseline says nothing about the register of the author's documents. The
+em-dash rule still ships **off**. It is one author's rule about lone dashes,
+and whether this measurement is reason enough to turn it on is for your own
+corpus to say.
 
 ## Two baselines, and what each one costs
 
@@ -168,8 +177,9 @@ parent config it did not read; pass `--config` to use that file.
 What lives in the config is what is a fact about **you**: your signature
 phrases, where your writing is, which detectors may fail your build, the
 domains you do not need redacted. What lives in the code is what is a claim
-about the **model**: the structure detectors, each with its measured ratio
-recorded beside it, in version control where a change is reviewable.
+about the **model**: the structure detectors, in version control where a
+change is reviewable, with the measurements behind the defaults in
+[docs/measurements](docs/measurements).
 
 Unknown keys are an error, not a shrug. A misspelled key that gets silently
 ignored is a setting you believe is in force and is not.
@@ -233,11 +243,15 @@ your transcripts.**
   would need a different reader; `read_turns` is the seam.
 - Sample files are read as UTF-8 markdown or plain text. One unreadable file
   is counted and skipped, never fatal.
+- The transcript baseline is only as clean as the harness's own flags.
+  Harness-composed records (`isMeta`) and compaction summaries
+  (`isCompactSummary`) are dropped and counted; a record the harness writes as
+  a user turn without marking it is counted as yours.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged
   sentence, a false one costs trust in every other row. Widening it would also
-  invalidate the measurements recorded beside it.
+  invalidate the measurements in `docs/measurements`.
 - The `rule_of_three_no_oxford` detector is low precision and is labelled as
   such in the output. It mostly catches clause coordination.
 - `prose_lint` misses a table row that opens with an HTML tag and ends with a

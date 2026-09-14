@@ -464,6 +464,8 @@ def read_turns(paths: Sequence[str],
 
     Assistant records whose ``message.model`` is ``<synthetic>`` are always
     dropped: those are harness-composed stand-ins, not any model's prose.
+    User records flagged ``isCompactSummary`` are dropped too: the harness
+    stores the model's compaction summary as a user record.
 
     Args:
         paths: Session .jsonl paths. One file is one session, which is what
@@ -471,9 +473,10 @@ def read_turns(paths: Sequence[str],
         since: Drop turns older than this instant.
         stats: Optional counter dict, updated in place with
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
-            counters ``meta_records``/``synthetic_records``/
-            ``model_filtered``/``noise_records``) so the caller can report
-            what was excluded instead of excluding it silently.
+            counters ``meta_records``/``compact_summaries``/
+            ``synthetic_records``/``model_filtered``/``noise_records``) so the
+            caller can report what was excluded instead of excluding it
+            silently.
         model: Substring an assistant record's ``message.model`` must contain,
             or None for all models. Without it every figure downstream is a
             blend across every model that ever wrote a transcript here, not
@@ -542,17 +545,30 @@ def read_turns(paths: Sequence[str],
                     if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
                         automated = True
                         break
+                    # isCompactSummary marks the summary Claude Code writes
+                    # when it compacts a long conversation. It is stored as a
+                    # USER record but the model wrote it, so counted as your
+                    # prose it put the model on both sides of every ratio.
+                    # Found 2026-09-13: in a 45-day window, 29 summaries held
+                    # half the baseline's words and nine in ten of its em
+                    # dashes, which made the model's clearest em-dash habit
+                    # read as one the two writers shared. The session test
+                    # above still sees a summary, so one that carries a
+                    # scheduled-run marker still drops its session.
+                    if rec.get("isCompactSummary"):
+                        _count(stats, "compact_summaries")
+                        continue
                     # isMeta marks a user record the harness composed rather
                     # than you: slash-command expansions and similar. It is
                     # the single largest contaminant found so far -- 55% of
                     # your baseline by word count (120,755 words down to
                     # 54,688) -- and it compressed every ratio toward 1
                     # because so much of "his" corpus was machine text.
-                    # Dropping it changed appositive_negation from 1.1x to
-                    # 2.4x, which is the difference between contradicting
-                    # your own observation about your writing and confirming
-                    # it. Counted before the noise filter, so every isMeta
-                    # record dropped is a record reported.
+                    # Dropping it moved appositive_negation from parity to
+                    # clearly model-heavy, which is the difference between
+                    # contradicting your own observation about your writing
+                    # and confirming it. Counted before the noise filter, so
+                    # every isMeta record dropped is a record reported.
                     if rec.get("isMeta"):
                         _count(stats, "meta_records")
                         continue
@@ -1008,8 +1024,8 @@ STRUCTURE_PATTERNS: Tuple[Tuple[str, str, str], ...] = (
     # stephenturner/skill-deslop. These are HYPOTHESES, not rules. The whole
     # point of measuring them against a matched baseline is that the folk list
     # is not automatically true of this model: on the cleaned reference corpus
-    # the lexicon below came out under parity, then at it (README table), so
-    # the baseline author uses these words at least as often as the model.
+    # the baseline author uses the lexicon below more often than the model
+    # does (README table).
     # (The first figure this comment carried was measured against the isMeta-
     # contaminated corpus, and was lower still.) A rule adopted from the list
     # unmeasured would have "corrected" the wrong writer.
@@ -1264,6 +1280,8 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                        "unreadable and skipped.")
         out.append(f"Excluded records: {stats.get('meta_records', 0):,} "
                    f"harness-composed (isMeta), "
+                   f"{stats.get('compact_summaries', 0):,} compaction "
+                   f"summaries, "
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('model_filtered', 0):,} other-model.")
