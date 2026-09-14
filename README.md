@@ -62,8 +62,8 @@ launched, and whole scheduled-run sessions. Whatever it does not recognise
 counts as the author. On the reference author's 45-day window ending
 2026-09-13, those spawned-session prompts were about a quarter of the words
 left before the tool recognised them, and after every exclusion it now makes,
-about a quarter of the words left are in turns whose opening text recurred at
-the start of five or more sessions, which the author may or may not have typed
+about a quarter of the words left are in turns whose opening text also opens
+author turns in five or more sessions, text the author may not have typed
 each time. Each correction moved the headline ratios, some of them several
 times over.
 
@@ -223,13 +223,16 @@ your transcripts.**
   harness notices, and prompts a model wrote for a session you launched are
   dropped and counted; cross-session messages are cut out, or dropped with
   their record when a tag is left over, and counted. A spawned session's prompt
-  is recognised only when the transcript that launched it is read too, at the
-  cost of one extra read of every transcript. A user record it does not
-  recognise is counted as yours whoever wrote it: a template you run
-  repeatedly, text you pasted, a spawned prompt whose parent was not read. On
-  the reference author's 45-day window ending 2026-09-13, turns opening with
-  text repeated at the start of five or more sessions were 8,389 of the 33,671
-  author words the report kept.
+  is recognised only as that session's first user record with prose, and only
+  when the transcript that launched it is read too, at the cost of one extra
+  read of every transcript whatever `--days` is. On the reference author's
+  45-day window ending 2026-09-13, 23 of the 39 spawned sessions sat in a
+  different project folder from their parent, so a transcripts glob narrowed
+  to one project keeps most of those prompts as yours. A user record it does
+  not recognise is counted as yours whoever wrote it: a template you run
+  repeatedly, text you pasted, a spawned prompt whose parent was not read. In
+  that window, turns whose opening text also opens author turns in five or
+  more sessions were 8,389 of the 33,462 author words the report kept.
 - A record written again later in its own transcript, under the same `uuid`
   and message, is read once, and a copy that carries text is counted. The same
   record in two transcripts, as when one session's history reappears in

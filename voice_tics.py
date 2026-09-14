@@ -197,16 +197,18 @@ CROSS_SESSION_RE = re.compile(
 CROSS_SESSION_OPEN = '<cross-session-message from="'
 CROSS_SESSION_CLOSE = "</cross-session-message>"
 
-# Tools whose text input the harness delivers, unchanged and unflagged, as the
-# first USER record of another session: (tool-name suffix, input field). A
-# model calls spawn_task with a prompt it wrote, you launch the session with
-# one click, and that prompt then opens the session as if you had typed it.
-# Found 2026-09-14 on the reference author's transcripts: 39 records in a
-# 45-day window, each exactly equal to a spawn_task prompt once system
-# reminders were cut, about a quarter of the words then left as the author's.
-# Messages sent between sessions are not listed: they arrive tagged, and are
-# handled at ``CROSS_SESSION_RE``. Matched by name suffix, since the MCP
-# server prefix differs between installations.
+# Tools whose text input the harness delivers, unflagged, as the first USER
+# record of another session: (tool name, input field). A model calls
+# spawn_task with a prompt it wrote, you launch the session with one click,
+# and that prompt then opens the session as if you had typed it. Found
+# 2026-09-14 on the reference author's transcripts: 39 records in a 45-day
+# window, each the first user record of its session and equal to a spawn_task
+# prompt once system reminders were cut and surrounding whitespace trimmed,
+# about a quarter of the words then left as the author's. Messages sent
+# between sessions are not listed: they carry the cross-session tag, and are
+# handled at ``CROSS_SESSION_RE``. The name is matched with or without an MCP
+# server prefix; that the prefix can differ between installations is a design
+# assumption, since the reference transcripts use one.
 COMPOSED_PROMPT_TOOLS: Tuple[Tuple[str, str], ...] = (("spawn_task", "prompt"),)
 
 # Boilerplate carried by every scheduled-task prompt. A scheduled run logs its
@@ -563,21 +565,41 @@ def _open_transcript(path: str) -> Optional[IO[str]]:
 
 
 def _prompt_key(text: str) -> str:
-    """A fingerprint of prose that ignores how whitespace was wrapped."""
-    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()
+    """A fingerprint of prose that ignores how whitespace was wrapped.
+
+    Encoded with ``surrogatepass``: JSON can escape half a surrogate pair,
+    which strict UTF-8 refuses, and one such record would otherwise abort
+    the whole run.
+    """
+    joined = " ".join(text.split())
+    return hashlib.sha256(joined.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-def composed_prompts(paths: Sequence[str]) -> Set[str]:
-    """Fingerprints of every prompt a model wrote for another session to open.
+def _composes_prompts(name: str, suffix: str) -> bool:
+    """Whether a tool name is ``suffix`` itself or ``suffix`` under a server.
 
-    Read from the assistant records of ``paths``: each tool_use whose name
-    ends with a ``COMPOSED_PROMPT_TOOLS`` suffix contributes its input field.
-    Only prompts whose parent transcript is among ``paths`` can be found, so
-    a spawned session read without its parent still counts that prompt as
-    yours. A line that cannot carry such a call is not parsed at all.
+    An MCP tool is named ``mcp__<server>__<tool>``, so the server segment is
+    skipped on the ``__`` boundary; a longer tool name that merely ends with
+    the suffix, such as ``respawn_task``, is not the same tool.
+    """
+    return name == suffix or name.endswith("__" + suffix)
+
+
+def composed_prompts(paths: Sequence[str]) -> Dict[str, Set[str]]:
+    """Every prompt a model wrote for another session to open, by fingerprint.
+
+    Read from the assistant records of ``paths``: each tool_use named by a
+    ``COMPOSED_PROMPT_TOOLS`` entry contributes its input field, cut the same
+    way a user record is (``_user_prose``) so the prompt and its delivery are
+    compared as the same text. Each fingerprint maps to the transcripts that
+    wrote it, since a prompt read back in the session that wrote it is that
+    session's author echoed, not a spawned session's opening. Only prompts
+    whose parent transcript is among ``paths`` can be found, so a spawned
+    session read without its parent still counts that prompt as yours. A line
+    without the literal tool-name suffix is not parsed at all.
     """
     suffixes = tuple(name for name, _ in COMPOSED_PROMPT_TOOLS)
-    found: Set[str] = set()
+    found: Dict[str, Set[str]] = {}
     for path in paths:
         fh = _open_transcript(path)
         if fh is None:
@@ -607,8 +629,13 @@ def composed_prompts(paths: Sequence[str]) -> Set[str]:
                         continue
                     for suffix, field in COMPOSED_PROMPT_TOOLS:
                         prompt = given.get(field)
-                        if name.endswith(suffix) and isinstance(prompt, str):
-                            found.add(_prompt_key(prompt))
+                        if not (_composes_prompts(name, suffix)
+                                and isinstance(prompt, str)):
+                            continue
+                        text, _withheld = _user_prose(prompt)
+                        if text is not None:
+                            key = _prompt_key(text)
+                            found.setdefault(key, set()).add(path)
     return found
 
 
@@ -626,10 +653,11 @@ def read_turns(paths: Sequence[str],
     Assistant records whose ``message.model`` is ``<synthetic>`` are always
     dropped: those are harness-composed stand-ins, not any model's prose.
     User records flagged ``isCompactSummary`` are dropped too: the harness
-    stores the model's compaction summary as a user record. So is an unflagged
-    user record whose prose is exactly a prompt a model wrote for a spawned
-    session (see ``composed_prompts``), which costs one extra read of
-    ``paths`` to find those prompts.
+    stores the model's compaction summary as a user record. So is the first
+    user record with prose in a transcript, when that prose is a prompt a
+    model in another transcript wrote for a spawned session (see
+    ``composed_prompts``); finding those prompts costs one extra read of
+    ``paths``, whatever ``since`` is.
 
     A record is dropped when an earlier record in the same file had the same
     ``uuid`` and the same ``message`` (see ``_replay_key``). A transcript can
@@ -662,6 +690,9 @@ def read_turns(paths: Sequence[str],
     Yields:
         One ``Turn`` per authored message, prose already scrubbed.
     """
+    # Materialised, since the prompt pass and the main pass both iterate it:
+    # a one-shot iterator would leave the main pass with nothing to read.
+    paths = list(paths)
     composed = composed_prompts(paths)
     for path in paths:
         session = os.path.basename(path)[:8]
@@ -675,6 +706,9 @@ def read_turns(paths: Sequence[str],
         opens = True
         # Keys of the records already read in this file, per _replay_key.
         seen: Set[Tuple[str, str]] = set()
+        # True until a user record with prose is read; only that record can
+        # be a spawned session's prompt.
+        first_prose = True
         fh = _open_transcript(path)
         if fh is None:
             continue
@@ -746,18 +780,29 @@ def read_turns(paths: Sequence[str],
                     if not _is_tool_result(content):
                         opens = True
                     text, withheld = _user_prose(content)
-                    # A model wrote this prompt for the session it opens. It
-                    # is counted after the flags below, so a flagged record is
-                    # reported as flagged.
-                    spawned = text is not None and _prompt_key(text) in composed
+                    # A model in another transcript wrote this prompt for the
+                    # session it opens. Only a transcript's first user record
+                    # with prose qualifies, so the author's own words repeated
+                    # later, or read back in the session whose model echoed
+                    # them into a prompt, stay the author's. Counted after the
+                    # flags below, so a flagged record is reported as flagged,
+                    # and before the cross-session and notice counters, so a
+                    # record is counted once.
+                    spawned = False
+                    if text is not None:
+                        if first_prose:
+                            writers = composed.get(_prompt_key(text), set())
+                            spawned = bool(writers) and path not in writers
+                        first_prose = False
                     # The session test runs BEFORE the date cutoff and before
                     # isMeta, so neither can hide the one record that marks a
                     # scheduled run: a --days cutoff falling after the prompt
                     # re-admitted the rest of that session, and the report
                     # then said nothing had been dropped. It tests your text
                     # after cross-session messages are cut out, so another
-                    # session quoting a marker does not drop yours, and nor
-                    # does a spawned prompt quoting one. A record dropped for a
+                    # session quoting a marker does not drop yours, and it
+                    # skips a spawned session's opening prompt, which a model
+                    # wrote and may quote a marker in. A record dropped for a
                     # leftover tag is not tested at all: its text cannot be
                     # told apart from the other session's.
                     if (text and not spawned and any(

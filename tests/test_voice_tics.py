@@ -562,9 +562,111 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertIn("Checking.", [t.text for t in self.turns])
 
     def test_a_flagged_record_matching_a_prompt_counts_as_flagged(self) -> None:
-        stats = self._parent_and_child([_rec("user", self.PROMPT, meta=True)])
-        self.assertEqual(stats.get("meta_records"), 1)
+        for flag, counter in (("isMeta", "meta_records"),
+                              ("isCompactSummary", "compact_summaries")):
+            with self.subTest(flag=flag):
+                flagged = json.loads(_rec("user", self.PROMPT))
+                flagged[flag] = True
+                stats = self._parent_and_child([json.dumps(flagged)])
+                self.assertEqual(stats.get(counter), 1)
+                self.assertNotIn("spawned_prompts", stats)
+
+    def test_only_a_sessions_first_prose_can_be_a_spawned_prompt(self) -> None:
+        """Later in a session the same words are the author's, typed or
+        pasted again."""
+        stats = self._parent_and_child([_rec("user", "start here"),
+                                        _rec("user", self.PROMPT)])
+        self.assertEqual(len(self._user_texts()), 3)
         self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_prompt_read_back_where_written_is_the_authors(self) -> None:
+        """A model that copies the author's message into spawn_task does not
+        make that message the model's in the session it came from."""
+        parent = _session([_rec("user", self.PROMPT),
+                           self._spawn(self.PROMPT)], self.tmp, "parent.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent], stats=stats))
+        self.assertEqual(self._user_texts(), [self.PROMPT])
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_reminder_inside_the_prompt_still_matches(self) -> None:
+        """The prompt is cut the way its delivery is, so a reminder span the
+        model quoted in the prompt does not hide the match."""
+        quoting = (self.PROMPT
+                   + " <system-reminder>quoted hook text</system-reminder>")
+        parent = _session([self._spawn(quoting)], self.tmp, "parent.jsonl")
+        child = _session([_rec("user", quoting)], self.tmp, "child.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent, child], stats=stats))
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+
+    def test_a_spawned_prompt_beside_a_cut_message_counts_once(self) -> None:
+        stats = self._parent_and_child(
+            [_rec("user", self.CROSS + "\n" + self.PROMPT)])
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+        self.assertNotIn("cross_session_messages", stats)
+
+    def test_paths_given_as_an_iterator_are_all_read(self) -> None:
+        parent = _session([_rec("user", "tidy up"), self._spawn(self.PROMPT)],
+                          self.tmp, "parent.jsonl")
+        child = _session([_rec("user", self.PROMPT)], self.tmp, "child.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns(iter([parent, child]), stats=stats))
+        self.assertEqual(self._user_texts(), ["tidy up"])
+        self.assertEqual(stats.get("sessions"), 2)
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+
+    def test_the_tool_is_named_with_or_without_a_server_prefix(self) -> None:
+        for tool, matches in (("spawn_task", True),
+                              ("mcp__other_server__spawn_task", True),
+                              ("mcp__x__respawn_task", False),
+                              ("respawn_task", False)):
+            with self.subTest(tool=tool):
+                stats = self._parent_and_child([_rec("user", self.PROMPT)],
+                                               parent_tool=tool)
+                self.assertEqual("spawned_prompts" in stats, matches)
+
+    def test_every_spawn_call_in_a_record_is_read(self) -> None:
+        second = "Rename the widget config key and update its three callers."
+        calls = [{"type": "tool_use", "name": "spawn_task",
+                  "input": {"prompt": prompt}}
+                 for prompt in (self.PROMPT, second)]
+        parent = _session([_rec("assistant", "", model="m", blocks=calls + [
+            {"type": "text", "text": "Two tasks flagged."}])],
+            self.tmp, "parent.jsonl")
+        paths = [parent,
+                 _session([_rec("user", self.PROMPT)], self.tmp, "one.jsonl"),
+                 _session([_rec("user", second)], self.tmp, "two.jsonl")]
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns(paths, stats=stats))
+        self.assertEqual(stats.get("spawned_prompts"), 2)
+
+    def test_a_malformed_line_naming_the_tool_costs_nothing(self) -> None:
+        """The prompt pass parses untrusted lines too; one bad line must not
+        abort the read before a single session is counted."""
+        bad = [json.dumps("spawn_task"),
+               json.dumps({"type": "assistant", "message": "spawn_task"}),
+               json.dumps({"type": "assistant", "message": {"content": [
+                   {"type": "tool_use", "name": "spawn_task",
+                    "input": "x"}]}}),
+               json.dumps({"type": "assistant", "message": {"content": [
+                   {"type": "tool_use", "name": "spawn_task",
+                    "input": {"prompt": ["not", "text"]}}]}})]
+        paths = [_session(bad, self.tmp, "bad.jsonl"),
+                 _session([_rec("user", "still read")], self.tmp,
+                          "good.jsonl")]
+        self.turns = list(vt.read_turns(paths))
+        self.assertEqual(self._user_texts(), ["still read"])
+
+    def test_a_lone_surrogate_in_a_prompt_costs_nothing(self) -> None:
+        """JSON can escape half a surrogate pair, which strict UTF-8 cannot
+        encode; fingerprinting it must not abort the run."""
+        lone = "caf\ud800 widgets, fix the badge"
+        parent = _session([self._spawn(lone)], self.tmp, "parent.jsonl")
+        child = _session([_rec("user", lone)], self.tmp, "child.jsonl")
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent, child], stats=stats))
+        self.assertEqual(stats.get("spawned_prompts"), 1)
 
     def test_a_spawned_prompt_before_the_window_is_not_counted(self) -> None:
         stats = self._parent_and_child(
@@ -577,7 +679,7 @@ class ReadTurnsTest(unittest.TestCase):
         """The documented limit: only prompts whose parent transcript is read
         can be recognised."""
         child = _session([_rec("user", self.PROMPT)], self.tmp, "child.jsonl")
-        self.assertEqual(vt.composed_prompts([child]), set())
+        self.assertEqual(vt.composed_prompts([child]), {})
         self.assertEqual(len(list(vt.read_turns([child]))), 1)
 
     def test_a_harness_notice_in_a_user_record_is_counted(self) -> None:
