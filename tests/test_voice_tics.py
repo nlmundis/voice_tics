@@ -51,7 +51,8 @@ def tearDownModule() -> None:
 def _rec(kind: str, text: str, *, sidechain: bool = False,
          blocks: Any = None, meta: bool = False,
          model: str | None = None,
-         ts: str = "2026-08-12T10:00:00.000Z") -> str:
+         ts: str = "2026-08-12T10:00:00.000Z",
+         uuid: str | None = None) -> str:
     """One transcript line as the harness writes it."""
     content: Any
     if blocks is not None:
@@ -70,6 +71,20 @@ def _rec(kind: str, text: str, *, sidechain: bool = False,
         rec["isMeta"] = True
     if model is not None:
         rec["message"]["model"] = model
+    if uuid is not None:
+        rec["uuid"] = uuid
+    return json.dumps(rec)
+
+
+def _replayed(line: str) -> str:
+    """A copy of a transcript line as a resume writes it back into the file.
+
+    The uuid, timestamp and message stay the original's; ``slug`` and ``cwd``
+    are set to what they were at resume time, as observed in real replays.
+    """
+    rec = json.loads(line)
+    rec["slug"] = "serialized-swinging-flute"
+    rec["cwd"] = "/resumed/from/here"
     return json.dumps(rec)
 
 
@@ -563,13 +578,15 @@ class ReadTurnsTest(unittest.TestCase):
              _rec("assistant", "Gamma.", model="other", ts=old),
              _rec("assistant", "API Error: 500", model="m", ts=old),
              _rec("user", "<task-notification>x</task-notification>", ts=old),
+             _rec("user", "old words", uuid="u0", ts=old),
+             _replayed(_rec("user", "old words", uuid="u0", ts=old)),
              _rec("user", "in the window")],
             since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc), model="m")
         self.assertEqual([t.text for t in self.turns], ["in the window"])
         self.assertEqual(stats.get("turns"), 1)
         for key in ("compact_summaries", "meta_records", "synthetic_records",
                     "cross_session_messages", "sidechain_records",
-                    "model_filtered", "noise_records"):
+                    "model_filtered", "noise_records", "replayed_records"):
             self.assertNotIn(key, stats)
 
     def test_a_subagent_record_is_counted(self) -> None:
@@ -592,7 +609,7 @@ class ReadTurnsTest(unittest.TestCase):
         counts = {"meta_records": 11, "compact_summaries": 12,
                   "cross_session_messages": 13, "synthetic_records": 14,
                   "noise_records": 15, "sidechain_records": 16,
-                  "model_filtered": 17}
+                  "model_filtered": 17, "replayed_records": 18}
         report = vt.render(mine, theirs, [], structures, 0, False,
                            stats={"sessions": 1, **counts})
         line = next(l for l in report.splitlines()
@@ -600,7 +617,7 @@ class ReadTurnsTest(unittest.TestCase):
         for phrase in ("11 harness-composed (isMeta)", "12 compaction summaries",
                        "13 with cross-session messages cut out",
                        "14 synthetic", "15 harness notices", "16 subagent",
-                       "17 other-model"):
+                       "17 other-model", "18 copies of an earlier record"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, line)
 
@@ -643,6 +660,80 @@ class ReadTurnsTest(unittest.TestCase):
                          [("user", True), ("assistant", True),
                           ("assistant", False), ("user", True),
                           ("assistant", True)])
+
+    def test_a_replayed_copy_is_counted_once(self) -> None:
+        """A transcript can hold a run of its earlier records written again,
+        directly after a resume's session metadata, under the same uuid,
+        timestamp and message. Read as new records, every turn in that run
+        was held twice."""
+        prompt = _rec("user", "fix the parser", uuid="u1")
+        reply = _rec("assistant", "The bug is on line twelve.", uuid="a1")
+        resume = json.dumps({"type": "custom-title", "customTitle": "Parser"})
+        stats = self._stats([
+            prompt, reply, resume, _replayed(prompt), _replayed(reply),
+            _rec("user", "now the tests", uuid="u2"),
+            _rec("assistant", "Adding them.", uuid="a2"),
+        ])
+        self.assertEqual([t.text for t in self.turns],
+                         ["fix the parser", "The bug is on line twelve.",
+                          "now the tests", "Adding them."])
+        self.assertEqual(stats.get("turns"), 4)
+        self.assertEqual(stats.get("replayed_records"), 2)
+
+    def test_a_record_without_a_uuid_is_never_collapsed(self) -> None:
+        """Without a uuid a copy cannot be told from the same words sent
+        again, so both are kept."""
+        for uuid in (None, ""):
+            with self.subTest(uuid=uuid):
+                stats = self._stats([_rec("user", "go on", uuid=uuid),
+                                     _rec("user", "go on", uuid=uuid)])
+                self.assertEqual([t.text for t in self.turns],
+                                 ["go on", "go on"])
+                self.assertNotIn("replayed_records", stats)
+
+    def test_a_reused_uuid_with_a_different_message_is_kept(self) -> None:
+        """Dropping it would hide text no earlier record carried."""
+        stats = self._stats([_rec("assistant", "First draft.", uuid="a1"),
+                             _rec("assistant", "Second draft.", uuid="a1")])
+        self.assertEqual([t.text for t in self.turns],
+                         ["First draft.", "Second draft."])
+        self.assertNotIn("replayed_records", stats)
+
+    def test_the_same_record_in_two_transcripts_is_kept_in_each(self) -> None:
+        line = _rec("user", "the same words", uuid="u1")
+        paths = [_session([line], self.tmp, "a.jsonl"),
+                 _session([_replayed(line)], self.tmp, "b.jsonl")]
+        stats: Dict[str, int] = {}
+        self.assertEqual(len(list(vt.read_turns(paths, stats=stats))), 2)
+        self.assertNotIn("replayed_records", stats)
+
+    def test_a_replayed_exclusion_is_counted_once(self) -> None:
+        """A copy is reported as a copy, not as its original's exclusion
+        again, so each record lands in one counter."""
+        meta = _rec("user", "expanded slash command", meta=True, uuid="u1")
+        side = _rec("assistant", "subagent prose", sidechain=True, uuid="a1")
+        stats = self._stats([meta, side, _replayed(meta), _replayed(side)])
+        self.assertEqual(stats.get("meta_records"), 1)
+        self.assertEqual(stats.get("sidechain_records"), 1)
+        self.assertEqual(stats.get("replayed_records"), 2)
+
+    def test_a_record_the_scan_does_not_read_marks_no_copy(self) -> None:
+        """The key is recorded only once a record is admitted as a user or
+        assistant record, so another record type carrying the same uuid and
+        message hides nothing."""
+        typed = json.loads(_rec("user", "the words typed", uuid="u1"))
+        other = dict(typed, type="attachment")
+        self._stats([json.dumps(other), json.dumps(typed)])
+        self.assertEqual([t.text for t in self.turns], ["the words typed"])
+
+    def test_a_lone_surrogate_in_a_message_costs_nothing(self) -> None:
+        """JSON can escape half a surrogate pair, which strict UTF-8 cannot
+        encode; hashing that message must not end the scan."""
+        lone = json.loads(_rec("user", "placeholder", uuid="u1"))
+        lone["message"]["content"] = "caf\ud800 words"
+        self._stats([json.dumps(lone), _rec("assistant", "Alpha beta.",
+                                            uuid="a1")])
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
 
 
 class NgramTest(unittest.TestCase):

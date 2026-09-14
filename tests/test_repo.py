@@ -217,25 +217,42 @@ class MutationSpecTest(unittest.TestCase):
         with open(os.path.join(REPO, "mutt_check.toml"), "rb") as fh:
             return tomllib.load(fh)
 
+    @staticmethod
+    def _edits(mutant: dict) -> list:
+        """A mutant's edits in the order mutt_check applies them.
+
+        A mutant is either one inline file/find/replace or a
+        ``[[mutant.edit]]`` list, which a decision spanning two places in a
+        file needs.
+        """
+        return mutant.get("edit") or [mutant]
+
     def test_every_mutant_names_a_file_that_exists(self) -> None:
         for mutant in self._spec()["mutant"]:
-            with self.subTest(mutant=mutant["name"]):
-                self.assertTrue(
-                    os.path.isfile(os.path.join(REPO, mutant["file"])),
-                    f"{mutant['file']} does not exist")
+            for edit in self._edits(mutant):
+                with self.subTest(mutant=mutant["name"], file=edit["file"]):
+                    self.assertTrue(
+                        os.path.isfile(os.path.join(REPO, edit["file"])),
+                        f"{edit['file']} does not exist")
 
     def test_every_mutant_anchor_appears_exactly_once(self) -> None:
         """A stale or ambiguous anchor tests nothing.
 
         mutt_check reports this as STALE at run time, but that needs the whole
-        gate; this catches it in the unit suite, in under a second.
+        gate; this catches it in the unit suite, in under a second. Edits in
+        a list are applied in order, as mutt_check applies them, so each
+        anchor is counted in the text the edits before it left.
         """
         for mutant in self._spec()["mutant"]:
-            with self.subTest(mutant=mutant["name"]):
-                text = _read(os.path.join(REPO, mutant["file"]))
-                self.assertEqual(
-                    text.count(mutant["find"]), 1,
-                    f"anchor for {mutant['name']} is stale or ambiguous")
+            texts: dict = {}
+            for i, edit in enumerate(self._edits(mutant)):
+                with self.subTest(mutant=mutant["name"], edit=i):
+                    path = os.path.join(REPO, edit["file"])
+                    text = texts[path] if path in texts else _read(path)
+                    self.assertEqual(
+                        text.count(edit["find"]), 1,
+                        f"anchor for {mutant['name']} is stale or ambiguous")
+                    texts[path] = text.replace(edit["find"], edit["replace"], 1)
 
     def test_every_mutant_says_why_it_matters(self) -> None:
         for mutant in self._spec()["mutant"]:

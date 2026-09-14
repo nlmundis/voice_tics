@@ -224,8 +224,12 @@ your transcripts.**
   record it does not recognise is counted as yours whoever wrote it: a session
   prompt a model drafted and you launched, a template you run repeatedly, text
   you pasted. On the reference author's 45-day window ending 2026-09-13,
-  spawned-session prompts alone were 10,643 of the 44,314 author words the
+  spawned-session prompts alone were 10,643 of the 44,105 author words the
   report kept.
+- A record written again later in its own transcript, under the same `uuid`
+  and message, is read once and the copy is counted. The same record in two
+  transcripts, as when one session's history reappears in another's file, is
+  still read in each.
 - `not_x_but_y` matches contracted closings (`it's B`, `they're B`, `but B`)
   and misses the fully uncontracted `it is not A, it is B`. Undercounting is
   the deliberate direction throughout: a missed tic costs one unflagged

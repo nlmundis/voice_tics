@@ -1108,3 +1108,99 @@ suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)"
 replace = "    first, last = offsets[node.lineno - 1], offsets[node.end_lineno]"
+
+# --- a record written again: read once, counted, kept apart by uuid and message
+
+[[mutant]]
+name = "replayed_copy_read_again"
+why = "A record written again later in its transcript was read as new, so every turn in a resumed run was held twice: 175 kept turns in one 45-day window."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if key in seen:\n                        _count(tally, \"replayed_records\")"
+replace = "                    if False:\n                        _count(tally, \"replayed_records\")"
+
+[[mutant]]
+name = "record_without_uuid_collapsed"
+why = "Without a uuid a copy cannot be told from the same words sent again; collapsing it deletes text that may have been typed twice."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if not isinstance(uuid, str) or not uuid:\n        return None"
+replace = "    if not isinstance(uuid, str) or not uuid:\n        uuid = \"\""
+
+[[mutant]]
+name = "reused_uuid_collapsed_whatever_its_message"
+why = "A uuid reused with a different message carries text no earlier record did; keying on the uuid alone would drop it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return uuid, hashlib.sha256(blob.encode(\"utf-8\", \"surrogatepass\")).hexdigest()"
+replace = "    return uuid, \"\""
+
+[[mutant]]
+name = "copies_collapsed_across_transcripts"
+why = "The dedupe was asked for within one file; a set shared across files changes which transcript keeps a record without that choice being made."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+
+[[mutant.edit]]
+file = "voice_tics.py"
+find = "        # Keys of the records already read in this file, per _replay_key.\n        seen: Set[Tuple[str, str]] = set()\n"
+replace = ""
+
+[[mutant.edit]]
+file = "voice_tics.py"
+find = "    for path in paths:\n        session = os.path.basename(path)[:8]"
+replace = "    seen: Set[Tuple[str, str]] = set()\n    for path in paths:\n        session = os.path.basename(path)[:8]"
+
+[[mutant]]
+name = "copies_dropped_uncounted"
+why = "Every other exclusion is reported; 1,132 copies dropped with no counter would be an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"replayed_records\")"
+replace = "                        pass"
+
+[[mutant]]
+name = "copies_counted_outside_the_window"
+why = "Under --days a copy the date cutoff drops anyway was never in the window, so counting it overstates what the dedupe removed."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"replayed_records\")"
+replace = "                        _count(excluded, \"replayed_records\")"
+
+[[mutant]]
+name = "copy_tested_after_its_originals_exclusion"
+why = "Tested after the other filters, a copy of an excluded record is counted under that exclusion again, the same double count one counter over."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+
+[[mutant.edit]]
+file = "voice_tics.py"
+find = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if rec.get(\"isSidechain\"):"
+replace = "                if rec.get(\"isSidechain\"):"
+
+[[mutant.edit]]
+file = "voice_tics.py"
+find = "                if not in_window:\n                    if kind == \"assistant\" and text:"
+replace = "                key = _replay_key(rec)\n                if key is not None:\n                    if key in seen:\n                        _count(tally, \"replayed_records\")\n                        continue\n                    seen.add(key)\n                if not in_window:\n                    if kind == \"assistant\" and text:"
+
+[[mutant]]
+name = "key_recorded_before_the_record_is_admitted"
+why = "A key recorded for a line the scan does not read lets that line hide a later record it does read."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                kind = rec.get(\"type\")\n                if kind not in (\"user\", \"assistant\"):\n                    continue"
+replace = "                kind = rec.get(\"type\")\n                if kind not in (\"user\", \"assistant\"):\n                    if _replay_key(rec) is not None:\n                        seen.add(_replay_key(rec))\n                    continue"
+
+[[mutant]]
+name = "lone_surrogate_ends_the_scan"
+why = "JSON can escape half a surrogate pair, and strict UTF-8 raises on it; one such message would end the scan of every later transcript."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "blob.encode(\"utf-8\", \"surrogatepass\")"
+replace = "blob.encode(\"utf-8\")"
+
+[[mutant]]
+name = "copies_missing_from_the_report"
+why = "A counted exclusion that never prints is still an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   f\"{stats.get('replayed_records', 0):,} copies of an \""
+replace = "                   f\"\""

@@ -76,11 +76,13 @@ import collections
 import dataclasses
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
 import sys
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import (Dict, Iterable, Iterator, List, Optional, Sequence, Set,
+                    Tuple)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -489,6 +491,36 @@ def _parse_when(rec: dict) -> Optional[dt.datetime]:
     return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
 
 
+def _replay_key(rec: dict) -> Optional[Tuple[str, str]]:
+    """Identify a record written again later in its transcript, or None.
+
+    The key is the record's ``uuid`` paired with a SHA-256 of its ``message``
+    serialised with sorted keys, so two records share a key only when the same
+    message was written under the same uuid. Fields the copies observed so far
+    rewrite (``slug``, ``cwd``, ``promptId``, ``parentUuid``,
+    ``toolUseResult``) stay outside the key. Both halves fail toward counting:
+    a record with no uuid gets no key, since a copy of it cannot be told from
+    the same words sent again, and a reused uuid with a different message gets
+    a different key, since dropping it would hide text no earlier record
+    carried. The message is hashed rather than kept so the set of seen keys
+    stays small, and encoded with ``surrogatepass`` because JSON can escape
+    half a surrogate pair, which strict UTF-8 refuses.
+
+    Args:
+        rec: One parsed transcript record.
+
+    Returns:
+        ``(uuid, message digest)``, or None when ``uuid`` is absent or not a
+        non-empty string, in which case the caller must not collapse it.
+    """
+    uuid = rec.get("uuid")
+    if not isinstance(uuid, str) or not uuid:
+        return None
+    blob = json.dumps(rec.get("message"), sort_keys=True, ensure_ascii=False,
+                      default=str)
+    return uuid, hashlib.sha256(blob.encode("utf-8", "surrogatepass")).hexdigest()
+
+
 def read_turns(paths: Sequence[str],
                since: Optional[dt.datetime] = None,
                stats: Optional[Dict[str, int]] = None,
@@ -505,6 +537,13 @@ def read_turns(paths: Sequence[str],
     User records flagged ``isCompactSummary`` are dropped too: the harness
     stores the model's compaction summary as a user record.
 
+    A record is dropped when an earlier record in the same file had the same
+    ``uuid`` and the same ``message`` (see ``_replay_key``). A transcript can
+    hold a run of its own earlier records written again, directly after a
+    resume's session metadata; read as new records, every turn in that run
+    was held twice. The scope is one file: the same uuid in two transcripts
+    is not collapsed.
+
     Args:
         paths: Session .jsonl paths. One file is one session, which is what
             makes the session-level automated test possible in a single pass.
@@ -513,7 +552,8 @@ def read_turns(paths: Sequence[str],
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``compact_summaries``/
             ``cross_session_messages``/``synthetic_records``/
-            ``sidechain_records``/``model_filtered``/``noise_records``) so the
+            ``sidechain_records``/``model_filtered``/``noise_records``/
+            ``replayed_records``) so the
             caller can report what was excluded instead of excluding it
             silently. An exclusion counter counts only records the scan
             would otherwise have kept: inside ``since`` and in a session
@@ -538,6 +578,8 @@ def read_turns(paths: Sequence[str],
         # True until the first assistant prose after something you sent, so
         # the opener table counts responses rather than records.
         opens = True
+        # Keys of the records already read in this file, per _replay_key.
+        seen: Set[Tuple[str, str]] = set()
         try:
             fh = open(path, encoding="utf-8", errors="replace")
         except OSError:
@@ -565,6 +607,21 @@ def read_turns(paths: Sequence[str],
                 # date cutoff drops anyway, which would report an exclusion
                 # the window never contained.
                 tally = excluded if in_window else None
+                # A copy of an earlier record is dropped before any other
+                # test, so it is counted once, here, rather than again under
+                # its original's exclusion, and it cannot move ``opens``.
+                # Measured 2026-09-14 over a snapshot of 563 transcripts: 721
+                # assistant and 447 user records were such copies, in 4
+                # files, and no copy differed from its original in type,
+                # timestamp or any flag tested below. The key is recorded
+                # here, once the record is admitted as a user or assistant
+                # record, so a line of another type cannot hide one.
+                key = _replay_key(rec)
+                if key is not None:
+                    if key in seen:
+                        _count(tally, "replayed_records")
+                        continue
+                    seen.add(key)
                 if rec.get("isSidechain"):
                     _count(tally, "sidechain_records")
                     continue
@@ -1340,7 +1397,9 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"{stats.get('synthetic_records', 0):,} synthetic, "
                    f"{stats.get('noise_records', 0):,} harness notices, "
                    f"{stats.get('sidechain_records', 0):,} subagent, "
-                   f"{stats.get('model_filtered', 0):,} other-model.")
+                   f"{stats.get('model_filtered', 0):,} other-model, "
+                   f"{stats.get('replayed_records', 0):,} copies of an "
+                   f"earlier record.")
     out.append("")
 
     if show_source_text:
