@@ -66,13 +66,15 @@ class TicDetection(unittest.TestCase):
         self.assertEqual(hit.tier, "error")
         self.assertEqual(hit.line, 2)
 
-    def test_not_x_but_y_contracted_form(self):
+    def test_not_x_but_y_contracted_form_is_a_warning(self):
         # The contracted surface form is 81% of the model's measured uses;
         # a linter that only saw "is not" would miss the tic it exists for.
+        # A warning: in one author's papers the "not A, but B" contrast was
+        # ordinary academic prose and did not separate from the model's.
         text = "The problem isn't the code, it's the config.\n"
         found, _ = prose_lint.lint_text(text)
         hit = next(f for f in found if f.rule == "not_x_but_y")
-        self.assertEqual(hit.tier, "error")
+        self.assertEqual(hit.tier, "warning")
         self.assertEqual(hit.line, 1)
 
     def test_curly_apostrophe_still_caught(self):
@@ -82,11 +84,17 @@ class TicDetection(unittest.TestCase):
         found, _ = prose_lint.lint_text(text)
         self.assertIn("not_x_but_y", _rules(found))
 
-    def test_appositive_negation_is_a_warning(self):
+    def test_appositive_negation_is_an_error(self):
         text = "We chose it by measuring, not guessing.\n"
         found, _ = prose_lint.lint_text(text)
         hit = next(f for f in found if f.rule == "appositive_negation")
+        self.assertEqual(hit.tier, "error")
+
+    def test_hedge_adverbs_are_a_warning(self):
+        found, _ = prose_lint.lint_text("It simply works.\n")
+        hit = next(f for f in found if f.rule == "hedge_adverbs")
         self.assertEqual(hit.tier, "warning")
+        self.assertEqual(hit.line, 1)
 
     def test_lone_em_dash_is_an_error_matched_pair_is_not(self):
         lone = "Read the SOW first — it changes the severity.\n"
@@ -126,7 +134,7 @@ class TicDetection(unittest.TestCase):
         found, _ = prose_lint.lint_text(text)
         hit = next(f for f in found if f.rule == "not_x_but_y")
         self.assertEqual(hit.line, 1)
-        self.assertEqual(hit.tier, "error")
+        self.assertEqual(hit.tier, "warning")
 
     def test_emphasis_in_a_table_cell_does_not_hide_the_tic(self):
         # Cells go through the same scrub as body prose: "**isn't**"
@@ -784,7 +792,7 @@ def _run_main(argv):
 
 class Cli(unittest.TestCase):
     CLEAN = "A perfectly ordinary sentence.\n"
-    WARN_ONLY = "We chose it by measuring, not guessing.\n"
+    WARN_ONLY = "The problem isn't the code, it's the config.\n"
     ERRORED = "The approach is deliberate here.\n"
 
     def test_exit_codes(self):

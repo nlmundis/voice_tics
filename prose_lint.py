@@ -34,22 +34,24 @@ WHAT FAILS A RUN INSTEAD
 
     * ``method_defence``: defending the method instead of stating the
       finding.
-    * ``not_x_but_y``: the explicit "it's not A, it's B" reveal.
-    * ``appositive_negation``: a WARNING rather than an error, so an
-      occurrence is a prompt to look, not proof of a draft. ``--strict``
-      promotes warnings to failures.
+    * ``appositive_negation``: the trailing "Y, not X" alternative.
+    * ``not_x_but_y`` and ``hedge_adverbs``: WARNINGS, so an occurrence is a
+      prompt to look rather than proof of a draft. ``--strict`` promotes
+      warnings to failures.
 
-    Each was put in its tier on ratios that have since been withdrawn, so
-    the tiers are a starting point, not a finding about who writes what.
+    The tiers were set by measuring the model's prose against one author's
+    unaided technical papers. The counts are not published, and papers
+    measured against chat prose partly measure the change of register and
+    subject, so the tiers are a starting point rather than a finding about
+    who writes what.
 
     A lone em dash is available as a rule and ships OFF. It is one author's
     punctuation preference about LONE dashes, not a measurement of a rate.
     Turn it on if your own measurement and your own style both say so.
 
-    Every default structure rule here was measured against a chat baseline and
-    runs on documents, the same objection a length threshold faces.
-    ``--baseline-from`` in voice_tics.py measures against documents instead,
-    which is the better test of a rule you mean to enforce on documents.
+    ``--baseline-from`` in voice_tics.py measures against documents, which is
+    how the default tiers were set and the better test of any rule you mean
+    to enforce on your own documents.
 
 RE-MEASURE BEFORE YOU TRUST THE DEFAULTS
     The defaults were chosen on one author's corpus. Run ``voice_tics.py``
@@ -87,12 +89,11 @@ import vt_config as config_mod
 import emdash
 import voice_tics
 
-# Why each DEFAULT tier key is in the tier it is in. The tiers were chosen on
-# ratios measured against the reference author's transcripts, and those ratios
-# are withdrawn (README): the baseline counted some of the model's writing as
-# the author's. So no figure is kept here. A ratio in this table would have to
-# be a dated measurement file committed under docs, which tests/test_repo.py
-# recomputes; until a baseline is trusted, there is none to cite.
+# Why each DEFAULT tier key is in the tier it is in. The tiers were set on
+# 2026-09-15 against one author's unaided technical papers, after the
+# transcript ratios were withdrawn (README). Those counts are not published, so
+# no figure is kept here. A ratio in this table would have to be a dated
+# measurement file committed under docs, which tests/test_repo.py recomputes.
 #
 # Which keys are actually in force is ``[lint] error`` and ``[lint] warn``,
 # defaulting to config.DEFAULT_ERROR_TICS and DEFAULT_WARN_TICS. This table is
@@ -100,15 +101,23 @@ import voice_tics
 # default key appears here, so the two cannot drift apart silently.
 TIC_PROVENANCE: Dict[str, str] = {
     "method_defence":
-        "error: defending the method instead of stating the finding; chosen "
-        "on withdrawn ratios, so re-measure before relying on the tier",
-    "not_x_but_y":
-        "error: the explicit reveal template; chosen on withdrawn ratios "
-        "that rested on one author use or none, so re-measure before "
-        "relying on the tier",
+        "error: defending the method instead of stating the finding; set "
+        "against one author's unaided papers (2026-09-15, counts not "
+        "published), so re-measure before relying on the tier",
     "appositive_negation":
-        "warning: a prompt to look rather than an error; chosen on withdrawn "
-        "ratios, so re-measure before relying on the tier",
+        "error: the trailing 'Y, not X' alternative; promoted from warning "
+        "when measured against one author's unaided papers (2026-09-15, "
+        "counts not published), so re-measure before relying on the tier",
+    "not_x_but_y":
+        "warning: the 'not A, but B' reveal also carries ordinary academic "
+        "contrasts, and in one author's unaided papers (2026-09-15, counts "
+        "not published) it did not separate from the model's prose, so it "
+        "was demoted from error",
+    "hedge_adverbs":
+        "warning: hedge adverbs such as 'really', 'simply' and 'actually'; "
+        "added when measured against one author's unaided papers "
+        "(2026-09-15, counts not published), and a prompt to look because "
+        "each word has ordinary uses",
 }
 
 EXCERPT_CAP = 60

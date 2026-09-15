@@ -1,7 +1,7 @@
 # voice_tics
 
 Find the phrases and structures an AI model overuses, by measuring them
-against **your own writing**, not against a list of words somebody decided
+against **your own writing** instead of a list of words somebody decided
 sound robotic.
 
 Then lint documents for the ones your own measurement separates.
@@ -52,34 +52,35 @@ Earlier versions of this README published ratios measured on the reference
 author's transcripts. They are withdrawn, because reviews kept finding more of
 the model's own writing counted as the author's.
 
-A transcript records who delivered each message to the session, not who wrote
-it. Claude Code flags two kinds of user record it wrote itself: slash-command
-expansions and similar (`isMeta`), and the summaries it writes when it compacts
-a conversation (`isCompactSummary`). This tool drops both, and drops records it
-recognises by their content too: harness notices, hook output, messages another
-session's model sent, prompts a model wrote for a session the author then
-launched, and whole scheduled-run sessions. Whatever it does not recognise
-counts as the author. On the reference author's 45-day window ending
-2026-09-13, those spawned-session prompts were about a quarter of the words
-left before the tool recognised them, and after every exclusion it now makes,
-about a quarter of the words left are in turns whose opening text also opens
-author turns in five or more sessions, text the author may not have typed
-each time. Each correction moved the headline ratios, some of them several
-times over.
+A transcript records who delivered each message to the session; it does not
+record who wrote it. Claude Code flags two kinds of user record it wrote
+itself: slash-command expansions and similar (`isMeta`), and the summaries it
+writes when it compacts a conversation (`isCompactSummary`). This tool drops
+both, and drops records it recognises by their content too: harness notices,
+hook output, messages another session's model sent, prompts a model wrote for a
+session the author then launched, and whole scheduled-run sessions. Whatever it
+does not recognise counts as the author. On the reference author's 45-day
+window ending 2026-09-13, those spawned-session prompts were about a quarter of
+the words left before the tool recognised them, and after every exclusion it
+now makes, about a quarter of the words left are in turns whose opening text
+also opens author turns in five or more sessions, text the author may not have
+typed each time. Each correction moved the headline ratios, some of them
+several times over.
 
-So the method stands and the published numbers do not. Measure your own
-corpus, and read a transcript baseline as the most it could be yours, not as
+So the method stands and the published numbers do not. Measure your own corpus,
+and read a transcript baseline as the most it could be yours rather than as
 what is: the report counts what it recognised as someone else's writing and
 dropped, and cannot count what it did not recognise. Where you can, use
 `--baseline-from` on documents you wrote unaided (below).
 
 Sentence length is **reported and can never fail a run** in `prose_lint`: a
 length threshold measures register, a linter runs on documents, and a chat
-baseline says nothing about the register of your documents. The same objection
-reaches every default rule, since each was chosen on a chat baseline and runs
-on documents; `--baseline-from` is the better test of a rule you mean to
-enforce. The em-dash rule
-ships **off**: it is one author's rule about lone dashes, not a measurement.
+baseline says nothing about the register of your documents. The default rules
+were set against documents instead: the model's prose measured with
+`--baseline-from` against the reference author's unaided technical papers,
+whose counts are not published here. The em-dash rule ships **off**: it is one
+author's rule about lone dashes, and a default that fails everyone's build on
+one author's punctuation is the error this repo argues against.
 
 ## Two baselines, and what each one costs
 
@@ -138,8 +139,9 @@ version.
 ## Configure
 
 Optional. With no config file the tool reads the standard Claude Code
-transcript location, ranks against your own turns, and lints with the two
-default error tics.
+transcript location, ranks against your own turns, and lints with the default
+rules: `method_defence` and `appositive_negation` as errors, `not_x_but_y` and
+`hedge_adverbs` as warnings.
 
 ```bash
 cp voice_tics.toml.example voice_tics.toml
@@ -153,10 +155,10 @@ What lives in the config is what is a fact about **you**: your signature
 phrases, where your writing is, which detectors may fail your build, the
 domains you do not need redacted. What lives in the code is what is a claim
 about the **model**: the structure detectors, in version control where a
-change is reviewable. The default lint rules were chosen on the measurements
-this README has withdrawn, so treat them as a starting point, not a finding.
+change is reviewable. The default lint rules were set against one author's
+papers, so treat them as a starting point and measure your own.
 
-Unknown keys are an error, not a shrug. A misspelled key that gets silently
+Unknown keys are an error. A misspelled key that gets silently
 ignored is a setting you believe is in force and is not.
 
 ## Linting
@@ -188,8 +190,8 @@ Nothing is banned by default. This is you saying you do not want to read a
 phrase, which needs no ratio behind it, and it is kept in its own config key
 and its own finding type so a preference is never later read back as evidence.
 
-The phrase is **literal, not a regex** — you are banning something you are
-tired of, not authoring a pattern, and making you escape it is a way to be
+The phrase is **literal rather than a regex** — you are banning something you
+are tired of, not authoring a pattern, and making you escape it is a way to be
 wrong quietly (`C++` as a regex is a repetition error). Matching ignores case,
 and the gaps between words match any run of spaces or hyphens, so
 `load bearing` also catches `load-bearing`.

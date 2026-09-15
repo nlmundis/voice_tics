@@ -716,8 +716,8 @@ name = "ratio_reintroduced_into_readme_prose"
 why = "A withdrawn figure quoted in prose is checked by nothing and reads as a finding."
 suites = ["tests.test_repo.DocsTest"]
 file = "README.md"
-find = "each time. Each correction moved the headline ratios, some of them several"
-replace = "each time. Each correction moved the headline ratios (em dash 7.7x), some of them several"
+find = "typed each time. Each correction moved the headline ratios, some of them"
+replace = "typed each time. Each correction moved the headline ratios (em dash 7.7x), some of them"
 
 [[mutant]]
 name = "measured_ratio_copied_into_a_docstring"
@@ -732,16 +732,16 @@ name = "integer_ratio_copied_into_a_comment"
 why = "A copy with no decimal point is still a copy; the guard must not key on one spelling."
 suites = ["tests.test_repo.DocsTest"]
 file = "vt_config.py"
-find = "# how one of them goes stale. They are only a default, and the whole argument"
-replace = "# how one of them goes stale (8x). They are only a default, and the whole argument"
+find = "# here, and prose_lint.TIC_PROVENANCE says why each key sits where it does."
+replace = "# here (8x), and prose_lint.TIC_PROVENANCE says why each key sits where it does."
 
 [[mutant]]
 name = "undated_ratio_hidden_in_the_provenance"
 why = "The provenance literal is exempt from the copy guard, so a ratio there with no dated measurement would be checked by nothing."
 suites = ["tests.test_repo.DocsTest"]
 file = "prose_lint.py"
-find = '        "error: the explicit reveal template; chosen on withdrawn ratios "'
-replace = '        "error: the explicit reveal template, once 12.4x; chosen on withdrawn ratios "'
+find = "        \"error: the trailing 'Y, not X' alternative; promoted from warning \""
+replace = "        \"error: the trailing 'Y, not X' alternative, once 12.4x; promoted from warning \""
 
 [[mutant]]
 name = "compaction_summary_counted_as_the_author"
@@ -1526,3 +1526,27 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "                    if key in seen:\n                        if _carries_text(kind, rec.get(\"message\")):"
 replace = "                    if key in seen:\n                        if kind == \"user\" and not _is_tool_result((rec.get(\"message\") or {}).get(\"content\")):\n                            opens = True\n                        if _carries_text(kind, rec.get(\"message\")):"
+
+[[mutant]]
+name = "appositive_negation_ships_as_a_warning"
+why = "Against one author's unaided papers 'Y, not X' separated from the model's prose; left a warning, a draft full of it passes the build."
+suites = ["tests.test_prose_lint.TicDetection", "tests.test_prose_lint.Cli"]
+file = "vt_config.py"
+find = "DEFAULT_ERROR_TICS: Tuple[str, ...] = (\"method_defence\", \"appositive_negation\")"
+replace = "DEFAULT_ERROR_TICS: Tuple[str, ...] = (\"method_defence\",)"
+
+[[mutant]]
+name = "not_x_but_y_ships_as_an_error"
+why = "Against one author's unaided papers 'not A, but B' carried ordinary academic contrasts and did not separate; as an error it fails the author's own prose."
+suites = ["tests.test_prose_lint.TicDetection", "tests.test_prose_lint.Cli"]
+file = "vt_config.py"
+find = "DEFAULT_WARN_TICS: Tuple[str, ...] = (\"not_x_but_y\", \"hedge_adverbs\")"
+replace = "DEFAULT_WARN_TICS: Tuple[str, ...] = (\"hedge_adverbs\",)"
+
+[[mutant]]
+name = "hedge_adverbs_left_out_of_the_defaults"
+why = "Hedge adverbs separated from one author's unaided papers; left out, a draft of 'really' and 'simply' lints clean."
+suites = ["tests.test_prose_lint.TicDetection", "tests.test_prose_lint.Cli"]
+file = "vt_config.py"
+find = "DEFAULT_WARN_TICS: Tuple[str, ...] = (\"not_x_but_y\", \"hedge_adverbs\")"
+replace = "DEFAULT_WARN_TICS: Tuple[str, ...] = (\"not_x_but_y\",)"
