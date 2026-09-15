@@ -57,12 +57,13 @@ it. Claude Code flags two kinds of user record it wrote itself: slash-command
 expansions and similar (`isMeta`), and the summaries it writes when it compacts
 a conversation (`isCompactSummary`). This tool drops both, and drops records it
 recognises by their content too: harness notices, hook output, messages another
-session's model sent, and whole scheduled-run sessions. Whatever it does not
-recognise counts as the author. On the reference author's 45-day window ending
-2026-09-13, after every exclusion the tool makes, about a quarter of the words
-left as "the author" were prompts the model had drafted for sessions the author
-launched, and nearly a fifth more were in turns whose opening text recurred at
-the start of five or more sessions, which the author may or may not have typed
+session's model sent, prompts a model wrote for a session the author then
+launched, and whole scheduled-run sessions. Whatever it does not recognise
+counts as the author. On the reference author's 45-day window ending
+2026-09-13, those spawned-session prompts were about a quarter of the words
+left before the tool recognised them, and after every exclusion it now makes,
+about a quarter of the words left are in turns whose opening text also opens
+author turns in five or more sessions, text the author may not have typed
 each time. Each correction moved the headline ratios, some of them several
 times over.
 
@@ -218,14 +219,31 @@ your transcripts.**
 - Sample files are read as UTF-8 markdown or plain text. One unreadable file
   is counted and skipped, never fatal.
 - The transcript baseline is only as clean as the harness's own flags and the
-  markers this tool knows. Records flagged `isMeta` or `isCompactSummary` and
-  harness notices are dropped and counted; cross-session messages are cut out,
-  or dropped with their record when a tag is left over, and counted. A user
-  record it does not recognise is counted as yours whoever wrote it: a session
-  prompt a model drafted and you launched, a template you run repeatedly, text
-  you pasted. On the reference author's 45-day window ending 2026-09-13,
-  spawned-session prompts alone were 10,643 of the 44,105 author words the
-  report kept.
+  markers this tool knows. Records flagged `isMeta` or `isCompactSummary`,
+  harness notices, and prompts a model wrote for a session you launched are
+  dropped and counted; cross-session messages are cut out, or dropped with
+  their record when a tag is left over, and counted. A spawned session's prompt
+  is recognised only as that session's first user record with prose, only when
+  the transcript whose model called the spawn_task tool is read too, only when
+  that call is timestamped no later than the record (a call or record without a
+  timestamp never matches), and only when no more records open a transcript
+  with that text than calls asked for it; a resumed session's copy of the same
+  record counts once. Text that opens more sessions than that is a kickoff you
+  reuse, so it is kept as yours and reported. Finding the prompts costs one
+  extra read of every transcript whatever `--days` is. A spawned session whose
+  prompt contains a scheduled-run marker is dropped whole, like any session
+  with one; a prompt that quotes a harness notice is counted as a notice; a
+  prompt that names a bare `<system-reminder>` tag keeps the text before the
+  tag counted as yours. A user record it does not recognise is counted as yours
+  whoever wrote it: a template you run repeatedly, text you pasted, a spawned
+  prompt whose parent was not read. The figures that follow were measured on
+  the reference author's 45-day window ending 2026-09-13, with scripts kept
+  outside this repository. 23 of the 39 spawned sessions sat in a different
+  project folder from their parent, so a transcripts glob narrowed to one
+  folder can leave a parent unread and keep its spawned session's prompt as
+  yours. With whitespace collapsed and digits removed, turns whose first 400
+  characters also begin author turns in five or more sessions were 8,389 of the
+  33,462 author words the report kept.
 - A record written again later in its own transcript, under the same `uuid`
   and message, is read once, and a copy that carries text is counted. The same
   record in two transcripts, as when one session's history reappears in

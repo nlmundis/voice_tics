@@ -444,8 +444,8 @@ name = "undecodable_byte_aborts_the_scan"
 why = "One bad byte in one transcript would raise out of the generator and cost every other session."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = '            fh = open(path, encoding="utf-8", errors="replace")'
-replace = '            fh = open(path, encoding="utf-8")'
+find = "        return open(path, encoding=\"utf-8\", errors=\"replace\")"
+replace = "        return open(path, encoding=\"utf-8\")"
 
 [[mutant]]
 name = "every_assistant_record_opens_a_response"
@@ -1108,6 +1108,296 @@ suites = ["tests.test_repo.MeasurementBindingTest"]
 file = "tests/test_repo.py"
 find = "    first, last = at(node.lineno, node.col_offset), at(node.end_lineno, node.end_col_offset)"
 replace = "    first, last = offsets[node.lineno - 1], offsets[node.end_lineno]"
+
+# --- prompts a model wrote for a session you launched ----------------------
+
+[[mutant]]
+name = "spawned_prompt_counted_as_the_author"
+why = "spawn_task hands the model's prompt to a new session as an unflagged user record; 39 such records were a quarter of one 45-day baseline's words."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if spawned:\n                        _count(tally, \"spawned_prompts\")"
+replace = "                    if False:\n                        _count(tally, \"spawned_prompts\")"
+
+[[mutant]]
+name = "spawned_prompts_dropped_uncounted"
+why = "An exclusion the report never shows hides how much of the baseline was the model's prompt."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"spawned_prompts\")"
+replace = "                        pass"
+
+[[mutant]]
+name = "spawned_prompts_missing_from_the_report"
+why = "A counted exclusion that never prints is still an exclusion nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   f\"{stats.get('spawned_prompts', 0):,} spawned-session \""
+replace = "                   f\"\""
+
+[[mutant]]
+name = "prompt_matched_on_a_prefix"
+why = "A record that starts with the model's prompt and goes on in the author's words is the author's; only the whole text matches."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    joined = \" \".join(text.split())"
+replace = "    joined = \" \".join(text.split())[:60]"
+
+[[mutant]]
+name = "prompt_matched_with_its_wrapping"
+why = "The reminder cut leaves line breaks and spacing around the prompt; matching raw text misses the same prompt rewrapped."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    joined = \" \".join(text.split())"
+replace = "    joined = text"
+
+[[mutant]]
+name = "any_tool_prompt_composes_a_session"
+why = "A subagent's prompt never opens a session; treating every prompt input as one would drop the author's own words that happen to match."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if not (_composes_prompts(name, suffix)\n                                and isinstance(prompt, str)):"
+replace = "                        if not (isinstance(prompt, str)):"
+
+[[mutant]]
+name = "spawn_tool_matched_by_exact_name"
+why = "Matched as one full name, the same tool under another server prefix, or with none, would count its prompt as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return name == suffix or name.endswith(\"__\" + suffix)"
+replace = "    return name == \"mcp__ccd_session__\" + suffix"
+
+[[mutant]]
+name = "spawned_prompt_counted_before_the_flags"
+why = "A flagged record is reported once, as flagged, whatever else it matches."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if rec.get(\"isCompactSummary\"):\n                        _count(tally, \"compact_summaries\")"
+replace = "                    if spawned:\n                        _count(tally, \"spawned_prompts\")\n                        continue\n                    if rec.get(\"isCompactSummary\"):\n                        _count(tally, \"compact_summaries\")"
+
+[[mutant]]
+name = "prompt_key_lone_surrogate_ends_the_scan"
+why = "JSON can escape half a surrogate pair, and strict UTF-8 raises on it; one such prompt or record would abort the whole run with no report."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return hashlib.sha256(joined.encode(\"utf-8\", \"surrogatepass\")).hexdigest()"
+replace = "    return hashlib.sha256(joined.encode(\"utf-8\")).hexdigest()"
+
+[[mutant]]
+name = "any_later_record_can_be_a_spawned_prompt"
+why = "Only a spawned session's opening record is the model's prompt; later in a session the same words are the author's, typed or pasted again."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if first_prose:\n"
+replace = "                        if True:\n"
+
+[[mutant]]
+name = "prompt_read_back_in_its_own_session_dropped"
+why = "A model that copies the author's opening into spawn_task does not make that opening the model's in the session it came from; only the transcript being read is left out of the writers."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not any(writer != path and called is not None and when is not None"
+replace = "        if not any(called is not None and when is not None"
+
+[[mutant]]
+name = "prompt_fingerprinted_before_the_reminder_cut"
+why = "The delivery is cut of reminder spans before it is fingerprinted; a prompt that quotes one must be cut the same way or never match."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        text, _withheld = _user_prose(prompt)"
+replace = "                        text, _withheld = prompt, \"\""
+
+[[mutant]]
+name = "one_shot_paths_read_once"
+why = "The prompt pass would use up an iterator and leave the main pass nothing to read, with no error."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    paths = list(paths)\n"
+replace = ""
+
+[[mutant]]
+name = "tool_suffix_matched_inside_a_longer_name"
+why = "respawn_task is not spawn_task; a bare suffix match would fingerprint an unrelated tool's input."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return name == suffix or name.endswith(\"__\" + suffix)"
+replace = "    return name.endswith(suffix)"
+
+[[mutant]]
+name = "non_object_line_breaks_the_prompt_pass"
+why = "A valid JSON line that is not an object would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+replace = "                if not opened:"
+
+[[mutant]]
+name = "non_object_message_breaks_the_prompt_pass"
+why = "A message that is not an object would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                content = (message.get(\"content\")\n                           if isinstance(message, dict) else None)"
+replace = "                content = message.get(\"content\")"
+
+[[mutant]]
+name = "non_object_input_breaks_the_prompt_pass"
+why = "A tool input that is not an object would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if not isinstance(name, str) or not isinstance(given, dict):"
+replace = "                    if not isinstance(name, str):"
+
+[[mutant]]
+name = "spawned_prompt_exempt_from_the_marker_test"
+why = "An exemption for the opening alone let a scheduled prompt copied into spawn_task keep every scheduled run it opened, and a compaction summary quoting the prompt dropped the session anyway."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):"
+replace = "                    if text and not spawned and any(m in text for m in AUTOMATED_SESSION_MARKERS):"
+
+[[mutant]]
+name = "reused_opening_counted_as_a_spawned_prompt"
+why = "Text that opens several sessions is a kickoff or template someone reuses; counting every one as the model's prompt drops the author's words from each."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        return len(calls) >= len(self.openings.get(key, ())) or None"
+replace = "        return True"
+
+[[mutant]]
+name = "reused_openings_kept_unreported"
+why = "An opening kept because it could not be told from a reused kickoff is a judgement the report must show."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"reused_openings_kept\")"
+replace = "                        pass"
+
+[[mutant]]
+name = "reused_openings_missing_from_the_report"
+why = "A counted judgement that never prints is one nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "            out.append(f\"Kept as yours: \"\n                       f\"{stats.get('reused_openings_kept', 0):,} session \""
+replace = "            out.append(f\"Kept as yours: \"\n                       f\"\""
+
+[[mutant]]
+name = "opening_before_the_call_matched"
+why = "A model that copies the author's earlier opening into a prompt does not make those earlier words the model's; order separates a prompt from what it copied."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   and called <= when"
+replace = "                   and True"
+
+[[mutant]]
+name = "unknown_time_matched"
+why = "Without both times the order cannot be checked, so a match is never assumed."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not any(writer != path and called is not None and when is not None\n                   and called <= when"
+replace = "        if not any(writer != path and (called is None or when is None\n                   or called <= when)"
+
+[[mutant]]
+name = "child_that_reflags_its_prompt_kept"
+why = "Leaving every writer out, not only the transcript being read, keeps a spawned session's prompt as the author's whenever its own model flags the same task again."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not any(writer != path and called is not None and when is not None"
+replace = "        if path in {w for w, _c in calls.values()} or not any(writer != path and called is not None and when is not None"
+
+[[mutant]]
+name = "record_without_prose_uses_up_the_opening"
+why = "Only a record with prose can open a session; a reminder-only or notice record before the prompt would hide it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if first_prose:\n                            spawned = evidence.spawned(text, path, when)\n                        first_prose = False"
+replace = "                        if first_prose:\n                            spawned = evidence.spawned(text, path, when)\n                    first_prose = False"
+
+[[mutant]]
+name = "subagent_record_takes_the_opening"
+why = "The prompt pass and read_turns must agree on a transcript's opening; a subagent's brief is not it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if rec.get(\"type\") != \"user\" or rec.get(\"isSidechain\"):"
+replace = "    if rec.get(\"type\") != \"user\":"
+
+[[mutant]]
+name = "user_record_supplies_a_prompt"
+why = "Only a model's tool call hands a prompt to a new session; a user record carrying the same block is not one."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                if rec.get(\"type\") != \"assistant\":\n                    continue\n                message = rec.get(\"message\")"
+replace = "                message = rec.get(\"message\")"
+
+[[mutant]]
+name = "truncated_line_breaks_the_prompt_pass"
+why = "A transcript line cut off mid-write is not valid JSON; parsed without a guard it would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                try:\n                    rec = json.loads(line)\n                except (ValueError, TypeError):\n                    continue\n                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+replace = "                rec = json.loads(line)\n                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+
+[[mutant]]
+name = "non_object_block_breaks_the_prompt_pass"
+why = "A content block that is not an object would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if (not isinstance(block, dict)\n                            or block.get(\"type\") != \"tool_use\"):\n                        continue\n                    name = block.get(\"name\")\n                    given = block.get(\"input\")\n                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+replace = "                    if (block.get(\"type\") != \"tool_use\"):\n                        continue\n                    name = block.get(\"name\")\n                    given = block.get(\"input\")\n                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+
+[[mutant]]
+name = "non_text_tool_name_breaks_the_prompt_pass"
+why = "A tool_use with no name would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+replace = "                    if not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+
+[[mutant]]
+name = "tool_suffix_matched_on_one_underscore"
+why = "cancel_spawn_task is not spawn_task under a server prefix; only the __ boundary separates the prefix from the tool."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return name == suffix or name.endswith(\"__\" + suffix)"
+replace = "    return name == suffix or name.endswith(\"_\" + suffix)"
+
+[[mutant]]
+name = "resumed_copy_counted_as_a_second_opening"
+why = "A resumed session's history copied into a new file repeats the opening record under its uuid; counted twice, the model's prompt looked like a reused kickoff and was kept as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    uuid = rec.get(\"uuid\")\n    if isinstance(uuid, str) and uuid:\n        return (\"uuid\", uuid)\n    return (\"line\", path, str(position))"
+replace = "    return (\"line\", path, str(position))"
+
+[[mutant]]
+name = "launched_twice_kept_as_reused"
+why = "Two calls with the same prompt can launch two sessions; ignoring how many calls were made keeps both model-written prompts as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        return len(calls) >= len(self.openings.get(key, ())) or None"
+replace = "        return len(self.openings.get(key, ())) <= 1 or None"
+
+[[mutant]]
+name = "every_prose_record_counted_as_an_opening"
+why = "Only a transcript's first prose is its opening; counting a later paste of the prompt makes a real spawned session look reused."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        opened = True\n"
+replace = ""
+
+[[mutant]]
+name = "record_without_prose_opens_in_the_prompt_pass"
+why = "A reminder-only record is no more an opening in the prompt pass than in read_turns; letting it end the search hides the real opening."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if prose is not None:\n                        evidence.openings.setdefault("
+replace = "                    opened = True\n                    if prose is not None:\n                        evidence.openings.setdefault("
+
+[[mutant]]
+name = "kept_openings_reported_under_a_sample_baseline"
+why = "Under --baseline-from no transcript user turn reaches a corpus, so a line saying openings were kept as yours reports an effect that did not happen."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not baseline_source:\n            # Under --baseline-from no transcript user turn reaches a corpus,"
+replace = "        if True:\n            # Under --baseline-from no transcript user turn reaches a corpus,"
 
 # --- a record written again: read once, counted, kept apart by uuid and message
 
