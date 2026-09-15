@@ -224,21 +224,26 @@ your transcripts.**
   dropped and counted; cross-session messages are cut out, or dropped with
   their record when a tag is left over, and counted. A spawned session's prompt
   is recognised only as that session's first user record with prose, only when
-  the transcript that launched it is read too and the call came before the
-  session opened, and only when no other transcript opens with the same text:
-  text that opens several sessions is a kickoff you reuse, so it is kept as
-  yours and reported. Finding the prompts costs one extra read of every
-  transcript whatever `--days` is. On the reference author's 45-day window
-  ending 2026-09-13, 23 of the 39 spawned sessions sat in a different project
-  folder from their parent, so a transcripts glob narrowed to one folder can
-  leave a parent unread and keep its spawned session's prompt as yours. A
+  the transcript whose model called the spawn_task tool is read too, only when
+  that call is timestamped no later than the record (a call or record without a
+  timestamp never matches), and only when no more records open a transcript
+  with that text than calls asked for it; a resumed session's copy of the same
+  record counts once. Text that opens more sessions than that is a kickoff you
+  reuse, so it is kept as yours and reported. Finding the prompts costs one
+  extra read of every transcript whatever `--days` is. A spawned session whose
+  prompt contains a scheduled-run marker is dropped whole, like any session
+  with one; a prompt that quotes a harness notice is counted as a notice; a
   prompt that names a bare `<system-reminder>` tag keeps the text before the
   tag counted as yours. A user record it does not recognise is counted as yours
   whoever wrote it: a template you run repeatedly, text you pasted, a spawned
-  prompt whose parent was not read. In that window, turns whose first 400
-  characters, digits removed and whitespace collapsed, also open author turns
-  in five or more sessions were 8,389 of the 33,462 author words the report
-  kept, measured with a script kept outside this repository.
+  prompt whose parent was not read. The figures that follow were measured on
+  the reference author's 45-day window ending 2026-09-13, with scripts kept
+  outside this repository. 23 of the 39 spawned sessions sat in a different
+  project folder from their parent, so a transcripts glob narrowed to one
+  folder can leave a parent unread and keep its spawned session's prompt as
+  yours. With whitespace collapsed and digits removed, turns whose first 400
+  characters also begin author turns in five or more sessions were 8,389 of the
+  33,462 author words the report kept.
 - A record written again later in its own transcript, under the same `uuid`
   and message, is read once, and a copy that carries text is counted. The same
   record in two transcripts, as when one session's history reappears in

@@ -1260,7 +1260,7 @@ name = "reused_opening_counted_as_a_spawned_prompt"
 why = "Text that opens several sessions is a kickoff or template someone reuses; counting every one as the model's prompt drops the author's words from each."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "        return None if self.openings.get(key, 0) > 1 else True"
+find = "        return len(calls) >= len(self.openings.get(key, ())) or None"
 replace = "        return True"
 
 [[mutant]]
@@ -1276,8 +1276,8 @@ name = "reused_openings_missing_from_the_report"
 why = "A counted judgement that never prints is one nobody can see."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "        out.append(f\"Kept as yours: {stats.get('reused_openings_kept', 0):,} \""
-replace = "        out.append(f\"Kept as yours: \""
+find = "            out.append(f\"Kept as yours: \"\n                       f\"{stats.get('reused_openings_kept', 0):,} session \""
+replace = "            out.append(f\"Kept as yours: \"\n                       f\"\""
 
 [[mutant]]
 name = "opening_before_the_call_matched"
@@ -1292,8 +1292,8 @@ name = "unknown_time_matched"
 why = "Without both times the order cannot be checked, so a match is never assumed."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "        if not any(writer != path and called is not None and when is not None"
-replace = "        if not any(writer != path"
+find = "        if not any(writer != path and called is not None and when is not None\n                   and called <= when"
+replace = "        if not any(writer != path and (called is None or when is None\n                   or called <= when)"
 
 [[mutant]]
 name = "child_that_reflags_its_prompt_kept"
@@ -1301,7 +1301,7 @@ why = "Leaving every writer out, not only the transcript being read, keeps a spa
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "        if not any(writer != path and called is not None and when is not None"
-replace = "        if path in {w for w, _c in self.calls.get(key, ())} or not any(called is not None and when is not None"
+replace = "        if path in {w for w, _c in calls.values()} or not any(writer != path and called is not None and when is not None"
 
 [[mutant]]
 name = "record_without_prose_uses_up_the_opening"
@@ -1358,6 +1358,46 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "    return name == suffix or name.endswith(\"__\" + suffix)"
 replace = "    return name == suffix or name.endswith(\"_\" + suffix)"
+
+[[mutant]]
+name = "resumed_copy_counted_as_a_second_opening"
+why = "A resumed session's history copied into a new file repeats the opening record under its uuid; counted twice, the model's prompt looked like a reused kickoff and was kept as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    uuid = rec.get(\"uuid\")\n    if isinstance(uuid, str) and uuid:\n        return (\"uuid\", uuid)\n    return (\"line\", path, str(position))"
+replace = "    return (\"line\", path, str(position))"
+
+[[mutant]]
+name = "launched_twice_kept_as_reused"
+why = "Two calls with the same prompt can launch two sessions; ignoring how many calls were made keeps both model-written prompts as the author's."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        return len(calls) >= len(self.openings.get(key, ())) or None"
+replace = "        return len(self.openings.get(key, ())) <= 1 or None"
+
+[[mutant]]
+name = "every_prose_record_counted_as_an_opening"
+why = "Only a transcript's first prose is its opening; counting a later paste of the prompt makes a real spawned session look reused."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        opened = True\n"
+replace = ""
+
+[[mutant]]
+name = "record_without_prose_opens_in_the_prompt_pass"
+why = "A reminder-only record is no more an opening in the prompt pass than in read_turns; letting it end the search hides the real opening."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if prose is not None:\n                        evidence.openings.setdefault("
+replace = "                    opened = True\n                    if prose is not None:\n                        evidence.openings.setdefault("
+
+[[mutant]]
+name = "kept_openings_reported_under_a_sample_baseline"
+why = "Under --baseline-from no transcript user turn reaches a corpus, so a line saying openings were kept as yours reports an effect that did not happen."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not baseline_source:\n            # Under --baseline-from no transcript user turn reaches a corpus,"
+replace = "        if True:\n            # Under --baseline-from no transcript user turn reaches a corpus,"
 
 # --- a record written again: read once, counted, kept apart by uuid and message
 

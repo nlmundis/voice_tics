@@ -578,13 +578,16 @@ class ReadTurnsTest(unittest.TestCase):
         """A model asked to run a scheduled job once copies its prompt into
         spawn_task; the runs that prompt opened are still scheduled runs."""
         sched = "This is a scheduled task. Push the vault and report."
-        runs = {f"run{i}.jsonl": [_rec("user", sched),
-                                  _rec("assistant", "Pushed.", model="m")]
-                for i in (1, 2)}
-        stats = self._read({"a_parent.jsonl": [_rec("user", "run it once"),
-                                               self._spawn(sched)], **runs})
-        self.assertEqual(stats.get("automated_sessions"), 2)
-        self.assertNotIn("spawned_prompts", stats)
+        for count in (1, 2):
+            with self.subTest(runs=count):
+                runs = {f"run{i}.jsonl": [_rec("user", sched),
+                                          _rec("assistant", "Pushed.",
+                                               model="m")]
+                        for i in range(count)}
+                stats = self._read({"a_parent.jsonl": [
+                    _rec("user", "run it once"), self._spawn(sched)], **runs})
+                self.assertEqual(stats.get("automated_sessions"), count)
+                self.assertNotIn("spawned_prompts", stats)
 
     def test_a_reused_opening_is_kept_and_reported(self) -> None:
         """A kickoff that opens several sessions is a template someone reuses,
@@ -597,6 +600,92 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(self._user_texts().count(kickoff), 2)
         self.assertEqual(stats.get("reused_openings_kept"), 2)
         self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_resumed_copy_of_a_spawned_opening_counts_once(self) -> None:
+        """Resuming writes the opening record, same uuid, into a new file; it
+        is one session's opening, not a kickoff that opens two."""
+        opening = _rec("user", self.PROMPT, uuid="u-open")
+        stats = self._read({
+            "a_parent.jsonl": [self._spawn(self.PROMPT)],
+            "b_child.jsonl": [opening, _rec("assistant", "On it.", model="m")],
+            "c_resumed.jsonl": [opening, _rec("user", "continue",
+                                              ts="2026-08-13T10:00:00.000Z")]})
+        self.assertNotIn("reused_openings_kept", stats)
+        self.assertEqual(stats.get("spawned_prompts"), 2)
+        self.assertEqual(self._user_texts(), ["continue"])
+
+    def test_a_prompt_launched_twice_counts_both_sessions(self) -> None:
+        """Two calls with the same prompt can launch two sessions; as many
+        calls as openings is what separates that from a reused kickoff."""
+        calls = [_rec("assistant", "", model="m", uuid=f"call{i}",
+                      ts=f"2026-08-12T09:0{i}:00.000Z", blocks=[
+                          {"type": "tool_use", "name": "spawn_task",
+                           "input": {"prompt": self.PROMPT}}])
+                 for i in (1, 2)]
+        stats = self._read({"a_parent.jsonl": calls,
+                            "b.jsonl": [_rec("user", self.PROMPT)],
+                            "c.jsonl": [_rec("user", self.PROMPT)]})
+        self.assertEqual(stats.get("spawned_prompts"), 2)
+        self.assertNotIn("reused_openings_kept", stats)
+
+    def test_only_a_transcripts_opening_counts_as_an_opening(self) -> None:
+        """The prompt pasted again later in the parent is not a second
+        session opening with it."""
+        stats = self._read({
+            "a_parent.jsonl": [_rec("user", "tidy up"),
+                               self._spawn(self.PROMPT),
+                               _rec("user", self.PROMPT)],
+            "b_child.jsonl": [_rec("user", self.PROMPT)]})
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+        self.assertNotIn("reused_openings_kept", stats)
+
+    def test_an_opening_the_writer_echoed_is_kept_where_reused(self) -> None:
+        """The writer's own opening counts as an opening, so the author's
+        kickoff that its model echoed stays the author's in the next session
+        that opens with it too."""
+        kickoff = "Kickoff: read the handoff note, then continue the items."
+        stats = self._read({
+            "a_writer.jsonl": [_rec("user", kickoff,
+                                    ts="2026-08-12T08:00:00.000Z"),
+                               self._spawn(kickoff)],
+            "b_next.jsonl": [_rec("user", kickoff)]})
+        self.assertEqual(self._user_texts().count(kickoff), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_the_prompt_pass_skips_records_without_prose(self) -> None:
+        """A reminder-only record before a reused kickoff is not the
+        opening, in the prompt pass as in read_turns."""
+        kickoff = "Kickoff: read the handoff note, then continue the items."
+        reminder = _rec("user", "<system-reminder>start</system-reminder>")
+        stats = self._read({
+            "a_parent.jsonl": [_rec("user", "tidy up"), self._spawn(kickoff)],
+            "b.jsonl": [reminder, _rec("user", kickoff)],
+            "c.jsonl": [reminder, _rec("user", kickoff)]})
+        self.assertEqual(stats.get("reused_openings_kept"), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_prompt_naming_a_bare_reminder_tag_is_a_known_miss(self) -> None:
+        """Documented limit: the prompt cuts to nothing, while its delivery
+        keeps the text before the tag once the harness's reminder closes it."""
+        named = "Explain why a bare <system-reminder> tag breaks the hook."
+        stats = self._read({
+            "a_parent.jsonl": [self._spawn(named)],
+            "b_child.jsonl": [_rec("user", named + "\n<system-reminder>ctx"
+                                               "</system-reminder>")]})
+        self.assertNotIn("spawned_prompts", stats)
+        self.assertEqual([text.strip() for text in self._user_texts()],
+                         ["Explain why a bare"])
+
+    def test_kept_openings_are_not_reported_with_samples(self) -> None:
+        mine, theirs = vt.Corpus("m"), vt.Corpus("t")
+        structures = {n: (0, 0) for n, _, _ in vt.STRUCTURE_PATTERNS}
+        stats = {"sessions": 1, "reused_openings_kept": 2}
+        with_samples = vt.render(mine, theirs, [], structures, 0, False,
+                                 stats=stats, baseline_source="docs/*.md")
+        without = vt.render(mine, theirs, [], structures, 0, False,
+                            stats=stats)
+        self.assertNotIn("Kept as yours", with_samples)
+        self.assertIn("Kept as yours: 2", without)
 
     def test_an_opening_written_before_the_call_is_the_authors(self) -> None:
         """A model that copies the author's earlier opening into a prompt
@@ -790,11 +879,24 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(stats.get("spawned_prompts"), 1)
 
     def test_a_spawned_prompt_before_the_window_is_not_counted(self) -> None:
-        stats = self._parent_and_child(
+        """A spawned opening the date cutoff drops anyway was never in the
+        window, so it is neither counted nor kept."""
+        parent = _session(
+            [_rec("user", "tidy up", ts="2025-12-31T10:00:00.000Z"),
+             self._spawn(self.PROMPT, ts="2025-12-31T11:00:00.000Z")],
+            self.tmp, "parent.jsonl")
+        child = _session(
             [_rec("user", self.PROMPT, ts="2026-01-01T10:00:00.000Z")],
-            since=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc))
+            self.tmp, "child.jsonl")
+        since = dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc)
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns([parent, child], stats=stats,
+                                        since=since))
+        self.assertEqual(self.turns, [])
         self.assertNotIn("spawned_prompts", stats)
-        self.assertEqual(self._user_texts(), ["tidy up what you find"])
+        unbounded: Dict[str, int] = {}
+        list(vt.read_turns([parent, child], stats=unbounded))
+        self.assertEqual(unbounded.get("spawned_prompts"), 1)
 
     def test_a_spawned_session_read_alone_keeps_its_prompt(self) -> None:
         """The documented limit: only prompts whose parent transcript is read
