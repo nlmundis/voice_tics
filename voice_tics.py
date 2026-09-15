@@ -203,7 +203,7 @@ CROSS_SESSION_CLOSE = "</cross-session-message>"
 # and that prompt then opens the session as if you had typed it. Found
 # 2026-09-14 on the reference author's transcripts: 39 records in a 45-day
 # window, each the first user record of its session and equal to a spawn_task
-# prompt once system reminders were cut and surrounding whitespace trimmed,
+# prompt once system reminders were cut and every run of whitespace collapsed,
 # about a quarter of the words then left as the author's. Messages sent
 # between sessions are not listed: they carry the cross-session tag, and are
 # handled at ``CROSS_SESSION_RE``. The name is matched with or without an MCP
@@ -585,34 +585,98 @@ def _composes_prompts(name: str, suffix: str) -> bool:
     return name == suffix or name.endswith("__" + suffix)
 
 
-def composed_prompts(paths: Sequence[str]) -> Dict[str, Set[str]]:
-    """Every prompt a model wrote for another session to open, by fingerprint.
+@dataclasses.dataclass
+class SpawnEvidence:
+    """What the prompt pass found, for deciding which openings a model wrote.
 
-    Read from the assistant records of ``paths``: each tool_use named by a
-    ``COMPOSED_PROMPT_TOOLS`` entry contributes its input field, cut the same
-    way a user record is (``_user_prose``) so the prompt and its delivery are
-    compared as the same text. Each fingerprint maps to the transcripts that
-    wrote it, since a prompt read back in the session that wrote it is that
-    session's author echoed, not a spawned session's opening. Only prompts
-    whose parent transcript is among ``paths`` can be found, so a spawned
-    session read without its parent still counts that prompt as yours. A line
-    without the literal tool-name suffix is not parsed at all.
+    ``calls`` maps a prompt's fingerprint to each (transcript, call time) in
+    which a model handed that prompt to a new session. ``openings`` maps a
+    fingerprint to how many transcripts open with that prose, since a model's
+    prompt opens the one session it launched, while text that opens several
+    sessions is a template or a kickoff someone reuses.
+    """
+
+    calls: Dict[str, List[Tuple[str, Optional[dt.datetime]]]]
+    openings: Dict[str, int]
+
+    def spawned(self, text: str, path: str,
+                when: Optional[dt.datetime]) -> Optional[bool]:
+        """Whether a transcript's opening prose is a prompt a model wrote.
+
+        True when a model in a different transcript handed exactly this
+        prose to a new session no later than ``when``, and no other
+        transcript opens with it. False when no such call exists. None when
+        such a call exists but the prose opens more than one transcript, so
+        it cannot be told from a reused opening: the caller keeps it as the
+        author's and reports it. An unknown time on either side is never a
+        match, since order is what separates a prompt from the words it
+        copied.
+        """
+        key = _prompt_key(text)
+        if not any(writer != path and called is not None and when is not None
+                   and called <= when
+                   for writer, called in self.calls.get(key, ())):
+            return False
+        return None if self.openings.get(key, 0) > 1 else True
+
+
+def _opening_prose(rec: dict) -> Optional[str]:
+    """A record's prose if it could open a transcript, else None.
+
+    The same test ``read_turns`` applies before it decides a transcript's
+    first prose: a user record, not a sidechain, whose ``_user_prose`` is not
+    None.
+    """
+    if rec.get("type") != "user" or rec.get("isSidechain"):
+        return None
+    message = rec.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return _user_prose(content)[0]
+
+
+def spawn_evidence(paths: Sequence[str]) -> SpawnEvidence:
+    """Read ``paths`` once for the prompts models wrote and how sessions open.
+
+    Each tool_use in an assistant record named by a ``COMPOSED_PROMPT_TOOLS``
+    entry contributes its input field, cut the same way a user record is
+    (``_user_prose``) so the prompt and its delivery are compared as the same
+    text; a prompt that is all harness text cuts to nothing and is not kept.
+    Each transcript's first prose, found by ``_opening_prose``, is
+    fingerprinted too. Only prompts whose parent transcript is among
+    ``paths`` can be found, so a spawned session read without its parent
+    still counts that prompt as yours. Every line is read until a
+    transcript's opening is found; after that, a line without the literal
+    tool-name suffix is not parsed.
+
+    Known limit: a prompt that names a bare ``<system-reminder>`` tag cuts
+    to nothing, while its delivery, with the harness's reminder appended,
+    keeps the text before the tag, so that part stays counted as yours.
     """
     suffixes = tuple(name for name, _ in COMPOSED_PROMPT_TOOLS)
-    found: Dict[str, Set[str]] = {}
+    evidence = SpawnEvidence(calls={}, openings={})
     for path in paths:
         fh = _open_transcript(path)
         if fh is None:
             continue
+        opened = False
         with fh:
             for line in fh:
-                if not any(s in line for s in suffixes):
+                if opened and not any(s in line for s in suffixes):
                     continue
                 try:
                     rec = json.loads(line)
                 except (ValueError, TypeError):
                     continue
-                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                if not isinstance(rec, dict):
+                    continue
+                if not opened:
+                    prose = _opening_prose(rec)
+                    if prose is not None:
+                        key = _prompt_key(prose)
+                        seen_before = evidence.openings.get(key, 0)
+                        evidence.openings[key] = seen_before + 1
+                        opened = True
+                if rec.get("type") != "assistant":
                     continue
                 message = rec.get("message")
                 content = (message.get("content")
@@ -634,9 +698,10 @@ def composed_prompts(paths: Sequence[str]) -> Dict[str, Set[str]]:
                             continue
                         text, _withheld = _user_prose(prompt)
                         if text is not None:
-                            key = _prompt_key(text)
-                            found.setdefault(key, set()).add(path)
-    return found
+                            calls = evidence.calls.setdefault(
+                                _prompt_key(text), [])
+                            calls.append((path, _parse_when(rec)))
+    return evidence
 
 
 def read_turns(paths: Sequence[str],
@@ -656,7 +721,7 @@ def read_turns(paths: Sequence[str],
     stores the model's compaction summary as a user record. So is the first
     user record with prose in a transcript, when that prose is a prompt a
     model in another transcript wrote for a spawned session (see
-    ``composed_prompts``); finding those prompts costs one extra read of
+    ``SpawnEvidence.spawned``); finding those prompts costs one extra read of
     ``paths``, whatever ``since`` is.
 
     A record is dropped when an earlier record in the same file had the same
@@ -674,6 +739,7 @@ def read_turns(paths: Sequence[str],
             ``sessions``/``automated_sessions``/``turns`` (and the exclusion
             counters ``meta_records``/``compact_summaries``/
             ``cross_session_messages``/``spawned_prompts``/
+            ``reused_openings_kept``/
             ``synthetic_records``/``sidechain_records``/
             ``model_filtered``/``noise_records``/``replayed_records``) so the
             caller can report what was excluded instead of excluding it
@@ -693,7 +759,7 @@ def read_turns(paths: Sequence[str],
     # Materialised, since the prompt pass and the main pass both iterate it:
     # a one-shot iterator would leave the main pass with nothing to read.
     paths = list(paths)
-    composed = composed_prompts(paths)
+    evidence = spawn_evidence(paths)
     for path in paths:
         session = os.path.basename(path)[:8]
         buffered: List[Turn] = []
@@ -781,18 +847,19 @@ def read_turns(paths: Sequence[str],
                         opens = True
                     text, withheld = _user_prose(content)
                     # A model in another transcript wrote this prompt for the
-                    # session it opens. Only a transcript's first user record
-                    # with prose qualifies, so the author's own words repeated
-                    # later, or read back in the session whose model echoed
-                    # them into a prompt, stay the author's. Counted after the
-                    # flags below, so a flagged record is reported as flagged,
-                    # and before the cross-session and notice counters, so a
-                    # record is counted once.
-                    spawned = False
+                    # session it opens (see SpawnEvidence.spawned). Only a
+                    # transcript's first user record with prose is tested, so
+                    # the author's words repeated later in a session stay the
+                    # author's; the writer-transcript and call-time tests keep
+                    # the author's own opening when a model copies it into a
+                    # prompt. Counted after the flags below, so a flagged
+                    # record is reported as flagged, and before the
+                    # cross-session and notice counters, so a record is
+                    # counted once.
+                    spawned: Optional[bool] = False
                     if text is not None:
                         if first_prose:
-                            writers = composed.get(_prompt_key(text), set())
-                            spawned = bool(writers) and path not in writers
+                            spawned = evidence.spawned(text, path, when)
                         first_prose = False
                     # The session test runs BEFORE the date cutoff and before
                     # isMeta, so neither can hide the one record that marks a
@@ -800,13 +867,14 @@ def read_turns(paths: Sequence[str],
                     # re-admitted the rest of that session, and the report
                     # then said nothing had been dropped. It tests your text
                     # after cross-session messages are cut out, so another
-                    # session quoting a marker does not drop yours, and it
-                    # skips a spawned session's opening prompt, which a model
-                    # wrote and may quote a marker in. A record dropped for a
-                    # leftover tag is not tested at all: its text cannot be
+                    # session quoting a marker does not drop yours. A spawned
+                    # session's opening prompt is tested like any record: a
+                    # compaction summary would quote it again anyway, and an
+                    # exemption let a scheduled prompt copied into spawn_task
+                    # keep every scheduled run it opened. A record dropped for
+                    # a leftover tag is not tested at all: its text cannot be
                     # told apart from the other session's.
-                    if (text and not spawned and any(
-                            m in text for m in AUTOMATED_SESSION_MARKERS)):
+                    if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
                         automated = True
                         break
                     # isCompactSummary marks the summary Claude Code writes
@@ -837,6 +905,8 @@ def read_turns(paths: Sequence[str],
                     if spawned:
                         _count(tally, "spawned_prompts")
                         continue
+                    if spawned is None:
+                        _count(tally, "reused_openings_kept")
                     if withheld == "cross_session":
                         _count(tally, "cross_session_messages")
                     elif withheld == "notice":
@@ -1555,6 +1625,9 @@ def render(mine: Corpus, theirs: Corpus, phrases: Sequence[Finding],
                    f"{stats.get('model_filtered', 0):,} other-model, "
                    f"{stats.get('replayed_records', 0):,} copies of an "
                    f"earlier record.")
+        out.append(f"Kept as yours: {stats.get('reused_openings_kept', 0):,} "
+                   f"session openings that match a spawned-session prompt "
+                   f"but open more than one session.")
     out.append("")
 
     if show_source_text:

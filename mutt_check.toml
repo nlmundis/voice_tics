@@ -1168,14 +1168,6 @@ find = "    return name == suffix or name.endswith(\"__\" + suffix)"
 replace = "    return name == \"mcp__ccd_session__\" + suffix"
 
 [[mutant]]
-name = "spawned_prompt_quoting_a_marker_drops_the_session"
-why = "A prompt the model wrote about a scheduled job is not a scheduled run; the marker test reads the author's text."
-suites = ["tests.test_voice_tics.ReadTurnsTest"]
-file = "voice_tics.py"
-find = "                    if (text and not spawned and any(\n"
-replace = "                    if (text and any(\n"
-
-[[mutant]]
 name = "spawned_prompt_counted_before_the_flags"
 why = "A flagged record is reported once, as flagged, whatever else it matches."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
@@ -1201,11 +1193,11 @@ replace = "                        if True:\n"
 
 [[mutant]]
 name = "prompt_read_back_in_its_own_session_dropped"
-why = "A model that copies the author's message into spawn_task does not make that message the model's in the session it came from."
+why = "A model that copies the author's opening into spawn_task does not make that opening the model's in the session it came from; only the transcript being read is left out of the writers."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                            spawned = bool(writers) and path not in writers"
-replace = "                            spawned = bool(writers)"
+find = "        if not any(writer != path and called is not None and when is not None"
+replace = "        if not any(called is not None and when is not None"
 
 [[mutant]]
 name = "prompt_fingerprinted_before_the_reminder_cut"
@@ -1236,8 +1228,8 @@ name = "non_object_line_breaks_the_prompt_pass"
 why = "A valid JSON line that is not an object would raise out of the prompt pass and lose every session."
 suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
-find = "                if not isinstance(rec, dict) or rec.get(\"type\") != \"assistant\":\n                    continue\n                message = rec.get(\"message\")\n                content = (message.get(\"content\")"
-replace = "                if rec.get(\"type\") != \"assistant\":\n                    continue\n                message = rec.get(\"message\")\n                content = (message.get(\"content\")"
+find = "                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+replace = "                if not opened:"
 
 [[mutant]]
 name = "non_object_message_breaks_the_prompt_pass"
@@ -1254,6 +1246,118 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "                    if not isinstance(name, str) or not isinstance(given, dict):"
 replace = "                    if not isinstance(name, str):"
+
+[[mutant]]
+name = "spawned_prompt_exempt_from_the_marker_test"
+why = "An exemption for the opening alone let a scheduled prompt copied into spawn_task keep every scheduled run it opened, and a compaction summary quoting the prompt dropped the session anyway."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):"
+replace = "                    if text and not spawned and any(m in text for m in AUTOMATED_SESSION_MARKERS):"
+
+[[mutant]]
+name = "reused_opening_counted_as_a_spawned_prompt"
+why = "Text that opens several sessions is a kickoff or template someone reuses; counting every one as the model's prompt drops the author's words from each."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        return None if self.openings.get(key, 0) > 1 else True"
+replace = "        return True"
+
+[[mutant]]
+name = "reused_openings_kept_unreported"
+why = "An opening kept because it could not be told from a reused kickoff is a judgement the report must show."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        _count(tally, \"reused_openings_kept\")"
+replace = "                        pass"
+
+[[mutant]]
+name = "reused_openings_missing_from_the_report"
+why = "A counted judgement that never prints is one nobody can see."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        out.append(f\"Kept as yours: {stats.get('reused_openings_kept', 0):,} \""
+replace = "        out.append(f\"Kept as yours: \""
+
+[[mutant]]
+name = "opening_before_the_call_matched"
+why = "A model that copies the author's earlier opening into a prompt does not make those earlier words the model's; order separates a prompt from what it copied."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                   and called <= when"
+replace = "                   and True"
+
+[[mutant]]
+name = "unknown_time_matched"
+why = "Without both times the order cannot be checked, so a match is never assumed."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not any(writer != path and called is not None and when is not None"
+replace = "        if not any(writer != path"
+
+[[mutant]]
+name = "child_that_reflags_its_prompt_kept"
+why = "Leaving every writer out, not only the transcript being read, keeps a spawned session's prompt as the author's whenever its own model flags the same task again."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "        if not any(writer != path and called is not None and when is not None"
+replace = "        if path in {w for w, _c in self.calls.get(key, ())} or not any(called is not None and when is not None"
+
+[[mutant]]
+name = "record_without_prose_uses_up_the_opening"
+why = "Only a record with prose can open a session; a reminder-only or notice record before the prompt would hide it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                        if first_prose:\n                            spawned = evidence.spawned(text, path, when)\n                        first_prose = False"
+replace = "                        if first_prose:\n                            spawned = evidence.spawned(text, path, when)\n                    first_prose = False"
+
+[[mutant]]
+name = "subagent_record_takes_the_opening"
+why = "The prompt pass and read_turns must agree on a transcript's opening; a subagent's brief is not it."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if rec.get(\"type\") != \"user\" or rec.get(\"isSidechain\"):"
+replace = "    if rec.get(\"type\") != \"user\":"
+
+[[mutant]]
+name = "user_record_supplies_a_prompt"
+why = "Only a model's tool call hands a prompt to a new session; a user record carrying the same block is not one."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                if rec.get(\"type\") != \"assistant\":\n                    continue\n                message = rec.get(\"message\")"
+replace = "                message = rec.get(\"message\")"
+
+[[mutant]]
+name = "truncated_line_breaks_the_prompt_pass"
+why = "A transcript line cut off mid-write is not valid JSON; parsed without a guard it would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                try:\n                    rec = json.loads(line)\n                except (ValueError, TypeError):\n                    continue\n                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+replace = "                rec = json.loads(line)\n                if not isinstance(rec, dict):\n                    continue\n                if not opened:"
+
+[[mutant]]
+name = "non_object_block_breaks_the_prompt_pass"
+why = "A content block that is not an object would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if (not isinstance(block, dict)\n                            or block.get(\"type\") != \"tool_use\"):\n                        continue\n                    name = block.get(\"name\")\n                    given = block.get(\"input\")\n                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+replace = "                    if (block.get(\"type\") != \"tool_use\"):\n                        continue\n                    name = block.get(\"name\")\n                    given = block.get(\"input\")\n                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+
+[[mutant]]
+name = "non_text_tool_name_breaks_the_prompt_pass"
+why = "A tool_use with no name would raise out of the prompt pass and lose every session."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "                    if not isinstance(name, str) or not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+replace = "                    if not isinstance(given, dict):\n                        continue\n                    for suffix, field in COMPOSED_PROMPT_TOOLS:\n                        prompt = given.get(field)\n                        if not (_composes_prompts(name, suffix)"
+
+[[mutant]]
+name = "tool_suffix_matched_on_one_underscore"
+why = "cancel_spawn_task is not spawn_task under a server prefix; only the __ boundary separates the prefix from the tool."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    return name == suffix or name.endswith(\"__\" + suffix)"
+replace = "    return name == suffix or name.endswith(\"_\" + suffix)"
 
 # --- a record written again: read once, counted, kept apart by uuid and message
 

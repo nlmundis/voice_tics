@@ -548,18 +548,129 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(len(self._user_texts()), 2)
         self.assertNotIn("spawned_prompts", stats)
 
-    def test_a_spawned_prompt_quoting_a_marker_keeps_the_session(self) -> None:
+    def _read(self, files: Dict[str, List[str]]) -> Dict[str, int]:
+        """read_turns over several named transcripts, in name order."""
+        paths = [_session(lines, self.tmp, name)
+                 for name, lines in sorted(files.items())]
+        stats: Dict[str, int] = {}
+        self.turns = list(vt.read_turns(paths, stats=stats))
+        return stats
+
+    def test_a_spawned_prompt_quoting_a_marker_drops_its_session(self) -> None:
+        """Tested like any record: a compaction summary would quote the
+        prompt again and drop the session anyway, so an exemption for the
+        opening alone was inconsistent."""
         quoting = ("Check why This is a scheduled task. appears in the log "
                    "output of the nightly job.")
-        parent = _session([self._spawn(quoting)], self.tmp, "parent.jsonl")
-        child = _session([_rec("user", quoting),
-                          _rec("assistant", "Checking.", model="m")],
-                         self.tmp, "child.jsonl")
-        stats: Dict[str, int] = {}
-        self.turns = list(vt.read_turns([parent, child], stats=stats))
-        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        summary = json.loads(_rec("user", "Summary: " + quoting))
+        summary["isCompactSummary"] = True
+        for later in ([], [json.dumps(summary)]):
+            with self.subTest(summary=bool(later)):
+                stats = self._read({
+                    "a_parent.jsonl": [self._spawn(quoting)],
+                    "b_child.jsonl": [
+                        _rec("user", quoting),
+                        _rec("assistant", "Checking.", model="m")] + later})
+                self.assertEqual(stats.get("automated_sessions"), 1)
+                self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_copied_scheduled_prompt_keeps_no_scheduled_run(self) -> None:
+        """A model asked to run a scheduled job once copies its prompt into
+        spawn_task; the runs that prompt opened are still scheduled runs."""
+        sched = "This is a scheduled task. Push the vault and report."
+        runs = {f"run{i}.jsonl": [_rec("user", sched),
+                                  _rec("assistant", "Pushed.", model="m")]
+                for i in (1, 2)}
+        stats = self._read({"a_parent.jsonl": [_rec("user", "run it once"),
+                                               self._spawn(sched)], **runs})
+        self.assertEqual(stats.get("automated_sessions"), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_reused_opening_is_kept_and_reported(self) -> None:
+        """A kickoff that opens several sessions is a template someone reuses,
+        not the one session a prompt launched, even if a model copied it."""
+        kickoff = "Kickoff: read the handoff note, then continue the items."
+        stats = self._read({
+            "a_parent.jsonl": [_rec("user", "tidy up"), self._spawn(kickoff)],
+            "b.jsonl": [_rec("user", kickoff)],
+            "c.jsonl": [_rec("user", kickoff)]})
+        self.assertEqual(self._user_texts().count(kickoff), 2)
+        self.assertEqual(stats.get("reused_openings_kept"), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_an_opening_written_before_the_call_is_the_authors(self) -> None:
+        """A model that copies the author's earlier opening into a prompt
+        does not make those earlier words the model's."""
+        stats = self._read({
+            "a_parent.jsonl": [_rec("user", "tidy up"),
+                               self._spawn(self.PROMPT)],
+            "b_earlier.jsonl": [_rec("user", self.PROMPT,
+                                     ts="2026-08-12T08:00:00.000Z")]})
+        self.assertIn(self.PROMPT, self._user_texts())
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_an_unknown_time_on_either_side_is_never_a_match(self) -> None:
+        undated_call = json.loads(self._spawn(self.PROMPT))
+        del undated_call["timestamp"]
+        undated_child = json.loads(_rec("user", self.PROMPT))
+        del undated_child["timestamp"]
+        cases = {"call": (json.dumps(undated_call),
+                          _rec("user", self.PROMPT)),
+                 "child": (self._spawn(self.PROMPT),
+                           json.dumps(undated_child))}
+        for undated, (parent, child) in cases.items():
+            with self.subTest(undated=undated):
+                stats = self._read({"a_parent.jsonl": [parent],
+                                    "b_child.jsonl": [child]})
+                self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_child_flagging_its_prompt_again_still_counts(self) -> None:
+        """Only the transcript being read is excluded from the writers, so a
+        spawned session whose model re-flags its own prompt is still a
+        spawned session."""
+        stats = self._read({
+            "a_parent.jsonl": [self._spawn(self.PROMPT)],
+            "b_child.jsonl": [_rec("user", self.PROMPT),
+                              self._spawn(self.PROMPT,
+                                          ts="2026-08-12T11:00:00.000Z")]})
         self.assertEqual(stats.get("spawned_prompts"), 1)
-        self.assertIn("Checking.", [t.text for t in self.turns])
+
+    def test_a_record_without_prose_does_not_use_up_the_opening(self) -> None:
+        stats = self._parent_and_child([
+            _rec("user", "<system-reminder>session start</system-reminder>"),
+            _rec("user", "<task-notification>x</task-notification>"),
+            _rec("user", self.PROMPT)])
+        self.assertEqual(stats.get("spawned_prompts"), 1)
+
+    def test_a_subagent_record_does_not_take_the_opening(self) -> None:
+        """The prompt pass and read_turns must agree on which record opens a
+        transcript; a subagent's prompt is not the session's opening."""
+        stats = self._read({
+            "a_parent.jsonl": [self._spawn(self.PROMPT)],
+            "b_one.jsonl": [_rec("user", "subagent brief", sidechain=True),
+                            _rec("user", self.PROMPT)],
+            "c_two.jsonl": [_rec("user", self.PROMPT)]})
+        self.assertEqual(stats.get("reused_openings_kept"), 2)
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_only_a_models_tool_call_supplies_a_prompt(self) -> None:
+        user_call = _rec("user", "", blocks=[
+            {"type": "tool_use", "name": "spawn_task",
+             "input": {"prompt": self.PROMPT}}], ts="2026-08-12T09:00:00.000Z")
+        stats = self._read({"a_parent.jsonl": [_rec("user", "tidy"),
+                                               user_call],
+                            "b_child.jsonl": [_rec("user", self.PROMPT)]})
+        self.assertIn(self.PROMPT, self._user_texts())
+        self.assertNotIn("spawned_prompts", stats)
+
+    def test_a_prompt_quoting_a_notice_is_counted_as_a_notice(self) -> None:
+        """A prompt carrying harness text cuts to nothing on both sides, so
+        its delivery is reported as the harness notice it contains."""
+        noisy = self.PROMPT + " Watch the UserPromptSubmit hook output."
+        stats = self._read({"a_parent.jsonl": [self._spawn(noisy)],
+                            "b_child.jsonl": [_rec("user", noisy)]})
+        self.assertEqual(stats.get("noise_records"), 1)
+        self.assertNotIn("spawned_prompts", stats)
 
     def test_a_flagged_record_matching_a_prompt_counts_as_flagged(self) -> None:
         for flag, counter in (("isMeta", "meta_records"),
@@ -620,6 +731,7 @@ class ReadTurnsTest(unittest.TestCase):
         for tool, matches in (("spawn_task", True),
                               ("mcp__other_server__spawn_task", True),
                               ("mcp__x__respawn_task", False),
+                              ("mcp__x__cancel_spawn_task", False),
                               ("respawn_task", False)):
             with self.subTest(tool=tool):
                 stats = self._parent_and_child([_rec("user", self.PROMPT)],
@@ -651,7 +763,16 @@ class ReadTurnsTest(unittest.TestCase):
                     "input": "x"}]}}),
                json.dumps({"type": "assistant", "message": {"content": [
                    {"type": "tool_use", "name": "spawn_task",
-                    "input": {"prompt": ["not", "text"]}}]}})]
+                    "input": {"prompt": ["not", "text"]}}]}}),
+               '{"type": "assistant", "message": {"content": [{"type": '
+               '"tool_use", "name": "spawn_task", "input": {"prompt": "cut',
+               json.dumps({"type": "assistant", "message": {"content": [
+                   "stray", {"type": "tool_use", "name": "spawn_task",
+                             "input": {"prompt": "x"}}]}}),
+               json.dumps({"type": "assistant", "message": {"content": [
+                   {"type": "tool_use", "name": None, "input": {}},
+                   {"type": "tool_use", "name": "spawn_task",
+                    "input": {"prompt": "x"}}]}})]
         paths = [_session(bad, self.tmp, "bad.jsonl"),
                  _session([_rec("user", "still read")], self.tmp,
                           "good.jsonl")]
@@ -679,7 +800,7 @@ class ReadTurnsTest(unittest.TestCase):
         """The documented limit: only prompts whose parent transcript is read
         can be recognised."""
         child = _session([_rec("user", self.PROMPT)], self.tmp, "child.jsonl")
-        self.assertEqual(vt.composed_prompts([child]), {})
+        self.assertEqual(vt.spawn_evidence([child]).calls, {})
         self.assertEqual(len(list(vt.read_turns([child]))), 1)
 
     def test_a_harness_notice_in_a_user_record_is_counted(self) -> None:
@@ -816,7 +937,7 @@ class ReadTurnsTest(unittest.TestCase):
                   "cross_session_messages": 13, "synthetic_records": 14,
                   "noise_records": 15, "sidechain_records": 16,
                   "model_filtered": 17, "spawned_prompts": 18,
-                  "replayed_records": 19}
+                  "replayed_records": 19, "reused_openings_kept": 20}
         report = vt.render(mine, theirs, [], structures, 0, False,
                            stats={"sessions": 1, **counts})
         line = next(l for l in report.splitlines()
@@ -829,6 +950,8 @@ class ReadTurnsTest(unittest.TestCase):
                        "19 copies of an earlier record"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, line)
+        self.assertIn("Kept as yours: 20 session openings that match a "
+                      "spawned-session prompt", report)
 
     def test_a_timestamp_without_an_offset_is_utc_not_a_crash(self) -> None:
         stats = self._stats(
