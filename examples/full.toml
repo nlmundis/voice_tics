@@ -19,8 +19,8 @@ signatures = [
 ]
 
 [lint]
-error = ["method_defence", "not_x_but_y"]
-warn = ["appositive_negation"]
+error = ["method_defence", "appositive_negation"]
+warn = ["not_x_but_y", "hedge_adverbs"]
 banned = [
   { phrase = "load bearing", instead = "does real work, carries weight" },
   { phrase = "blast radius", instead = "what it touches", tier = "warning" },

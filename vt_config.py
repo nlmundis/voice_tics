@@ -73,18 +73,18 @@ def _toml_module() -> Any:
 # baseline possible without asking anyone to collect anything.
 DEFAULT_TRANSCRIPTS = "~/.claude/projects/*/*.jsonl"
 
-# Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. These
-# two were chosen as the defaults on ratios the README has since withdrawn,
-# because the transcript baseline counted some of the model's writing as the
-# author's. No figure is repeated here: an unchecked copy of a measurement is
-# how one of them goes stale. They are only a default, and the whole argument
-# of this tool is that you should measure your own.
-DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "not_x_but_y")
+# Which detectors may fail a lint run, by key into STRUCTURE_PATTERNS. The
+# tiers were set on 2026-09-15 by measuring the model's prose against one
+# author's unaided technical papers, a document baseline, after the transcript
+# ratios were withdrawn. The counts are not published, so no figure is repeated
+# here, and prose_lint.TIC_PROVENANCE says why each key sits where it does.
+# They are only a default, and the whole argument of this tool is that you
+# should measure your own.
+DEFAULT_ERROR_TICS: Tuple[str, ...] = ("method_defence", "appositive_negation")
 
-# A warning, so an occurrence is a prompt to look rather than proof of a
-# draft; chosen on the same withdrawn ratios. Warnings never fail a run
-# without --strict.
-DEFAULT_WARN_TICS: Tuple[str, ...] = ("appositive_negation",)
+# Warnings, so an occurrence is a prompt to look rather than proof of a draft.
+# Warnings never fail a run without --strict.
+DEFAULT_WARN_TICS: Tuple[str, ...] = ("not_x_but_y", "hedge_adverbs")
 
 TOP_KEYS = frozenset({"corpus", "baseline", "lint", "output"})
 CORPUS_KEYS = frozenset({"transcripts"})
