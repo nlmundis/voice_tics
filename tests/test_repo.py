@@ -1083,9 +1083,9 @@ class MeasurementBindingTest(unittest.TestCase):
 
 
 class StdlibOnlyTest(unittest.TestCase):
-    """"Stdlib only, Python 3.9+" must be true with no TOML parser installed.
+    """"Stdlib only, Python 3.10+" must be true with no TOML parser installed.
 
-    On 3.9 and 3.10 there is no ``tomllib``. A module-scope import made both
+    On 3.10 there is no ``tomllib``. A module-scope import made both
     entry points die before argparse, config file or not.
     """
 
@@ -1120,7 +1120,7 @@ class StdlibOnlyTest(unittest.TestCase):
 
     def test_the_readme_says_when_tomli_is_needed(self) -> None:
         readme = _read(os.path.join(REPO, "README.md"))
-        self.assertIn("Stdlib only, Python 3.9+", readme)
+        self.assertIn("Stdlib only, Python 3.10+", readme)
         self.assertIn("pip install tomli", readme)
 
 

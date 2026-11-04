@@ -44,8 +44,8 @@ def _toml_module() -> Any:
 
     WHY THE IMPORT IS NOT AT MODULE SCOPE
         ``tomllib`` arrived in Python 3.11. At module scope, a missing parser
-        on 3.9 or 3.10 killed both entry points before argparse ran, config
-        file or not, which made the README's "stdlib only, Python 3.9+" false
+        on 3.10 killed both entry points before argparse ran, config
+        file or not, which made the README's "stdlib only, Python 3.10+" false
         for the zero-config case the tool is built around. Importing here
         means only a run that actually has a config file needs a parser, and
         that run gets a ConfigError saying what to install instead of a
@@ -57,14 +57,14 @@ def _toml_module() -> Any:
     try:
         import tomllib
         return tomllib
-    except ImportError:  # Python 3.10 and earlier
+    except ImportError:  # Python 3.10
         pass
     try:
         import tomli
         return tomli
     except ImportError:
         raise ConfigError(
-            "reading a config file on Python 3.10 or earlier needs tomli: "
+            "reading a config file on Python 3.10 needs tomli: "
             "pip install tomli") from None
 
 

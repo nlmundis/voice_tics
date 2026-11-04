@@ -7,13 +7,10 @@ on:
 
 jobs:
   check:
-    # Pinned, not ubuntu-latest: setup-python ships no 3.9 for Ubuntu 26.04,
-    # so the latest image fails the 3.9 leg before it runs anything, and 3.9
-    # is the floor the README promises.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
