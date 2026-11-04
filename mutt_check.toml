@@ -277,7 +277,7 @@ replace = "        if True:"
 
 [[mutant]]
 name = "config_parser_imported_at_module_scope"
-why = "On 3.9 and 3.10 there is no tomllib; a module-scope import kills both entry points before argparse, config file or not."
+why = "On 3.10 there is no tomllib; a module-scope import kills both entry points before argparse, config file or not."
 suites = ["tests.test_repo.StdlibOnlyTest"]
 file = "vt_config.py"
 find = 'CONFIG_NAME = "voice_tics.toml"'
