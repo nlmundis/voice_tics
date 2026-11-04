@@ -277,7 +277,7 @@ replace = "        if True:"
 
 [[mutant]]
 name = "config_parser_imported_at_module_scope"
-why = "On 3.9 and 3.10 there is no tomllib; a module-scope import kills both entry points before argparse, config file or not."
+why = "On 3.10 there is no tomllib; a module-scope import kills both entry points before argparse, config file or not."
 suites = ["tests.test_repo.StdlibOnlyTest"]
 file = "vt_config.py"
 find = 'CONFIG_NAME = "voice_tics.toml"'
@@ -777,6 +777,14 @@ suites = ["tests.test_voice_tics.ReadTurnsTest"]
 file = "voice_tics.py"
 find = "    if CROSS_SESSION_OPEN in raw:\n        withheld = \"cross_session\""
 replace = "    if False:\n        withheld = \"cross_session\""
+
+[[mutant]]
+name = "harness_notice_tested_for_a_scheduled_marker"
+why = "All nine reference sessions whose only marker sat in a notice were quoting it; testing notices drops them as scheduled runs."
+suites = ["tests.test_voice_tics.ReadTurnsTest"]
+file = "voice_tics.py"
+find = "    if any(marker in raw for marker in USER_NOISE_MARKERS):"
+replace = "    if any(marker in raw for marker in USER_NOISE_MARKERS) and not any(m in raw for m in AUTOMATED_SESSION_MARKERS):"
 
 [[mutant]]
 name = "cross_session_messages_dropped_uncounted"

@@ -970,6 +970,18 @@ class ReadTurnsTest(unittest.TestCase):
         self.assertEqual(stats.get("automated_sessions", 0), 0)
         self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
 
+    def test_a_marker_quoted_in_a_harness_notice_keeps_the_session(self) -> None:
+        """A notice is not tested for a marker. In the reference transcripts,
+        every session whose only marker sat in a notice was quoting it."""
+        notice = ("<task-notification><result>The prompt reads: This is a "
+                  "scheduled task.</result></task-notification>")
+        stats = self._stats([_rec("user", "review the filter"),
+                             _rec("user", notice),
+                             _rec("assistant", "Reviewing.")])
+        self.assertEqual(stats.get("automated_sessions", 0), 0)
+        self.assertEqual(stats.get("noise_records"), 1)
+        self.assertEqual([t.role for t in self.turns], ["user", "assistant"])
+
     def test_a_record_with_no_timestamp_is_inside_the_window(self) -> None:
         undated = json.loads(_rec("user", "x", meta=True))
         del undated["timestamp"]

@@ -896,7 +896,11 @@ def read_turns(paths: Sequence[str],
                     # exemption let a scheduled prompt copied into spawn_task
                     # keep every scheduled run it opened. A record dropped for
                     # a leftover tag is not tested at all: its text cannot be
-                    # told apart from the other session's.
+                    # told apart from the other session's. Nor is a harness
+                    # notice: measured 2026-11-04 on the reference author's
+                    # transcripts, all 9 sessions with a marker only inside a
+                    # notice were reports or prompts quoting it, none a
+                    # scheduled run.
                     if text and any(m in text for m in AUTOMATED_SESSION_MARKERS):
                         automated = True
                         break

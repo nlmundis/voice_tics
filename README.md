@@ -123,7 +123,7 @@ are doing.
 
 ## Install
 
-Nothing to install. Stdlib only, Python 3.9+.
+Nothing to install. Stdlib only, Python 3.10+.
 
 ```bash
 git clone https://github.com/nlmundis/voice_tics
@@ -131,7 +131,7 @@ cd voice_tics
 python3 voice_tics.py --days 30
 ```
 
-The one exception is reading a config file on Python 3.10 or earlier, where
+The one exception is reading a config file on Python 3.10, where
 the standard library has no TOML parser: `pip install tomli`. Without a config
 file nothing is imported beyond the standard library, on any supported
 version.
