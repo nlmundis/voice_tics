@@ -277,6 +277,13 @@ your transcripts.**
   punctuation). `Read the SOW first — it changes the severity` in a cell has
   that shape, and counting dashes cannot tell a term from a clause. A matched
   pair in a cell is never reported.
+- The sample-baseline contamination guard fires only when most constructions
+  sit near parity, so a corpus diluted evenly with model text passes it in
+  silence (see "The one real trap" above). A dispersion test would need a
+  threshold nobody has calibrated, and a guard that fires on clean samples is
+  worse than one that stays quiet, so it is kept that way.
+- `make check` exits 2 on a fresh clone until mutt_check is installed, by
+  design (see Development): a gate that skips itself reads as a passed one.
 - Chat-register tics (`let_me`, `i_should_note`) are measured but are useless
   for linting documents, because they cannot appear in one. `prose_lint` does
   not carry them: a linter that did would report clean runs as a property of
